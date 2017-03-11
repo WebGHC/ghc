@@ -72,7 +72,7 @@ llvmCodeGen dflags h us cmm_stream
 llvmCodeGen' :: Stream.Stream LlvmM RawCmmGroup () -> LlvmM ()
 llvmCodeGen' cmm_stream
   = do  -- Preamble
-        renderLlvm pprLlvmHeader
+        renderLlvm header
         ghcInternalFunctions
         cmmMetaLlvmPrelude
 
@@ -85,6 +85,13 @@ llvmCodeGen' cmm_stream
 
         -- Postamble
         cmmUsedLlvmGens
+  where
+    header :: SDoc
+    header = sdocWithDynFlags $ \dflags ->
+      let target = LLVM_TARGET
+          Just (LlvmTarget dl _ _) = lookup target (llvmTargets dflags)
+      in     text ("target datalayout = \"" ++ dl ++ "\"")
+         $+$ text ("target triple = \"" ++ target ++ "\"")
 
 llvmGroupLlvmGens :: RawCmmGroup -> LlvmM ()
 llvmGroupLlvmGens cmm = do

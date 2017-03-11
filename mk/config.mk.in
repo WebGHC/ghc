@@ -735,6 +735,7 @@ NM = @NmCmd@
 AR = @ArCmd@
 OBJDUMP = @ObjdumpCmd@
 
+CLANG = @ClangCmd@
 LLC = @LlcCmd@
 OPT = @OptCmd@
 
