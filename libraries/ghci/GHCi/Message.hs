@@ -59,6 +59,10 @@ import System.Exit
 import System.IO
 import System.IO.Error
 
+import Data.Time.Clock ( UTCTime( UTCTime )
+                       , picosecondsToDiffTime, diffTimeToPicoseconds)
+import Data.Time.Calendar ( Day(ModifiedJulianDay) )
+
 -- -----------------------------------------------------------------------------
 -- The RPC protocol between GHC and the interactive server
 
@@ -249,6 +253,29 @@ data THMessage a where
   IsExtEnabled :: Extension -> THMessage (THResult Bool)
   ExtsEnabled :: THMessage (THResult [Extension])
 
+  ReadProcessWithExitCode :: FilePath -> [String] -> String
+                          -> THMessage (THResult (ExitCode, String, String))
+  FindExecutables :: String -> THMessage (THResult [FilePath])
+  DoesFileExist :: FilePath -> THMessage (THResult Bool)
+  DoesDirectoryExist :: FilePath -> THMessage (THResult Bool)
+  GetCurrentDirectry :: THMessage (THResult FilePath)
+  GetDirectoryContents :: FilePath -> THMessage (THResult [FilePath])
+  CreateDirectoryIfMissing :: Bool -> FilePath -> THMessage (THResult ())
+  CanonicalizePath :: FilePath -> THMessage (THResult FilePath)
+
+  GetAccessTime :: FilePath -> THMessage (THResult UTCTime)
+  GetModificationTime :: FilePath -> THMessage (THResult UTCTime)
+
+  ReadFile :: FilePath -> THMessage (THResult String)
+  WriteFile :: FilePath -> String -> THMessage (THResult ())
+  AppendFile :: FilePath -> String -> THMessage (THResult ())
+
+  ReadFileBS :: FilePath -> THMessage (THResult ByteString)
+  WriteFileBS :: FilePath -> ByteString -> THMessage (THResult ())
+  AppendFileBS :: FilePath -> ByteString -> THMessage (THResult ())
+
+  RemoveFile :: FilePath -> THMessage (THResult ())
+
   StartRecover :: THMessage ()
   EndRecover :: Bool -> THMessage ()
 
@@ -282,7 +309,24 @@ getTHMessage = do
     15 -> THMsg <$> EndRecover <$> get
     16 -> return (THMsg RunTHDone)
     17 -> THMsg <$> AddModFinalizer <$> get
-    _  -> THMsg <$> (AddForeignFile <$> get <*> get)
+    18 -> THMsg <$> (AddForeignFile <$> get <*> get)
+    19 -> THMsg <$> (ReadProcessWithExitCode <$> get <*> get <*> get)
+    20 -> THMsg <$> (FindExecutables <$> get)
+    21 -> THMsg <$> (DoesFileExist <$> get)
+    22 -> THMsg <$> (DoesDirectoryExist <$> get)
+    23 -> THMsg <$> return GetCurrentDirectry
+    24 -> THMsg <$> (GetDirectoryContents <$> get)
+    25 -> THMsg <$> (CreateDirectoryIfMissing <$> get <*> get)
+    26 -> THMsg <$> (CanonicalizePath <$> get)
+    27 -> THMsg <$> (GetAccessTime <$> get)
+    28 -> THMsg <$> (GetModificationTime <$> get)
+    29 -> THMsg <$> (ReadFile <$> get)
+    30 -> THMsg <$> (WriteFile <$> get <*> get)
+    31 -> THMsg <$> (AppendFile <$> get <*> get)
+    32 -> THMsg <$> (ReadFileBS <$> get)
+    33 -> THMsg <$> (WriteFileBS <$> get <*> get)
+    34 -> THMsg <$> (AppendFileBS <$> get <*> get)
+    _  -> THMsg <$> (RemoveFile <$> get)
 
 putTHMessage :: THMessage a -> Put
 putTHMessage m = case m of
@@ -305,7 +349,27 @@ putTHMessage m = case m of
   RunTHDone                   -> putWord8 16
   AddModFinalizer a           -> putWord8 17 >> put a
   AddForeignFile lang a       -> putWord8 18 >> put lang >> put a
+  ReadProcessWithExitCode a b c -> putWord8 19 >> put a >> put b >> put c
+  FindExecutables path        -> putWord8 20 >> put path
+  DoesFileExist path          -> putWord8 21 >> put path
+  DoesDirectoryExist path     -> putWord8 22 >> put path
+  GetCurrentDirectry          -> putWord8 23
+  GetDirectoryContents path   -> putWord8 24 >> put path
+  CreateDirectoryIfMissing i path -> putWord8 25 >> put i >> put path
+  CanonicalizePath path       -> putWord8 26 >> put path
 
+  GetAccessTime path          -> putWord8 27 >> put path
+  GetModificationTime path    -> putWord8 28 >> put path
+
+  ReadFile path               -> putWord8 29 >> put path
+  WriteFile path contents     -> putWord8 30 >> put path >> put contents
+  AppendFile path contents    -> putWord8 31 >> put path >> put contents
+
+  ReadFileBS path             -> putWord8 32 >> put path
+  WriteFileBS path contents   -> putWord8 33 >> put path >> put contents
+  AppendFileBS path contents  -> putWord8 34 >> put path >> put contents
+
+  RemoveFile path             -> putWord8 35 >> put path
 
 data EvalOpts = EvalOpts
   { useSandboxThread :: Bool
@@ -421,6 +485,11 @@ data QState = QState
        -- ^ pipe to communicate with GHC
   }
 instance Show QState where show _ = "<QState>"
+
+instance Binary UTCTime where
+  put (UTCTime (ModifiedJulianDay d) t) = put d >> put (diffTimeToPicoseconds t)
+  get = UTCTime <$> (ModifiedJulianDay <$> get)
+                <*> (picosecondsToDiffTime <$> get)
 
 data Msg = forall a . (Binary a, Show a) => Msg (Message a)
 

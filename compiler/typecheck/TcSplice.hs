@@ -127,6 +127,11 @@ import Data.Data (Data)
 import Data.Proxy    ( Proxy (..) )
 import GHC.Exts         ( unsafeCoerce# )
 
+import qualified System.Process   as Proc
+import qualified System.Directory as Dir
+import qualified System.IO        as File
+
+
 {-
 ************************************************************************
 *                                                                      *
@@ -933,6 +938,31 @@ instance TH.Quasi TcM where
   qExtsEnabled =
     EnumSet.toList . extensionFlags . hsc_dflags <$> getTopEnv
 
+  qReadProcessWithExitCode f args stdin =
+    liftIO (Proc.readProcessWithExitCode f args stdin)
+
+  qFindExecutables = liftIO . Dir.findExecutables
+  qDoesFileExist = liftIO . Dir.doesFileExist
+  qDoesDirectoryExist = liftIO . Dir.doesDirectoryExist
+  qGetCurrentDirectory = liftIO Dir.getCurrentDirectory
+  qGetDirectoryContents = liftIO . Dir.getDirectoryContents
+  qCreateDirectoryIfMissing create_parents =
+    liftIO . Dir.createDirectoryIfMissing create_parents
+  qCanonicalizePath = liftIO . Dir.canonicalizePath
+
+  qGetAccessTime = liftIO . Dir.getAccessTime
+  qGetModificationTime = liftIO . Dir.getModificationTime
+
+  qReadFile = liftIO . File.readFile
+  qWriteFile f = liftIO . File.writeFile f
+  qAppendFile f = liftIO . File.appendFile f
+
+  qReadFileBS = liftIO . B.readFile
+  qWriteFileBS f = liftIO . B.writeFile f
+  qAppendFileBS f = liftIO . B.appendFile f
+
+  qRemoveFile = liftIO . Dir.removeFile
+
 -- | Adds a mod finalizer reference to the local environment.
 addModFinalizerRef :: ForeignRef (TH.Q ()) -> TcM ()
 addModFinalizerRef finRef = do
@@ -1105,6 +1135,31 @@ handleTHMessage msg = case msg of
   AddForeignFile lang str -> wrapTHResult $ TH.qAddForeignFile lang str
   IsExtEnabled ext -> wrapTHResult $ TH.qIsExtEnabled ext
   ExtsEnabled -> wrapTHResult $ TH.qExtsEnabled
+
+  ReadProcessWithExitCode a b c ->
+    wrapTHResult $ TH.qReadProcessWithExitCode a b c
+  FindExecutables n -> wrapTHResult $ TH.qFindExecutables n
+  DoesFileExist p -> wrapTHResult $ TH.qDoesFileExist p
+  DoesDirectoryExist p -> wrapTHResult $ TH.qDoesDirectoryExist p
+  GetCurrentDirectry -> wrapTHResult TH.qGetCurrentDirectory
+  GetDirectoryContents p -> wrapTHResult $ TH.qGetDirectoryContents p
+  CreateDirectoryIfMissing i p ->
+    wrapTHResult $ TH.qCreateDirectoryIfMissing i p
+  CanonicalizePath p -> wrapTHResult $ TH.qCanonicalizePath p
+
+  GetAccessTime p -> wrapTHResult $ TH.qGetAccessTime p
+  GetModificationTime p -> wrapTHResult $ TH.qGetModificationTime p
+
+  ReadFile p -> wrapTHResult $ TH.qReadFile p
+  WriteFile p c -> wrapTHResult $ TH.qWriteFile p c
+  AppendFile p c -> wrapTHResult $ TH.qAppendFile p c
+
+  ReadFileBS p -> wrapTHResult $ TH.qReadFileBS p
+  WriteFileBS p c -> wrapTHResult $ TH.qWriteFileBS p c
+  AppendFileBS p c -> wrapTHResult $ TH.qAppendFileBS p c
+
+  RemoveFile p -> wrapTHResult $ TH.qRemoveFile p
+
   _ -> panic ("handleTHMessage: unexpected message " ++ show msg)
 
 getAnnotationsByTypeRep :: TH.AnnLookup -> TypeRep -> TcM [[Word8]]

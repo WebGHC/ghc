@@ -8,5 +8,5 @@ loadStringFromFile :: Q Exp
 loadStringFromFile = do
   let externalDependency = "TH_Depends_external.txt"
   qAddDependentFile externalDependency
-  s <- qRunIO $ readFile externalDependency
+  s <- qReadFile externalDependency
   stringE s

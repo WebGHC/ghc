@@ -45,6 +45,10 @@ import GHC.ForeignSrcLang.Type
 import Language.Haskell.TH.LanguageExtensions
 import Numeric.Natural
 
+import System.Exit (ExitCode)
+import Data.ByteString (ByteString)
+import Data.Time.Clock (UTCTime)
+
 #if HAS_MONADFAIL
 import qualified Control.Monad.Fail as Fail
 #endif
@@ -105,6 +109,39 @@ class Monad m => Quasi m where
   qIsExtEnabled :: Extension -> m Bool
   qExtsEnabled :: m [Extension]
 
+  -- Support for remote Template Haskell, where TH is evaluated on the host via
+  -- iserv, but needs access to files and process on the build machine.  We
+  -- therefore provide explicit support for File and Process IO.
+  -- System.Process
+  qReadProcessWithExitCode :: FilePath
+                           -> [String]
+                           -> String
+                           -> m (ExitCode, String, String)
+
+  -- System.Directory
+  qFindExecutables :: String -> m [FilePath]
+  qDoesFileExist :: FilePath -> m Bool
+  qDoesDirectoryExist :: FilePath -> m Bool
+  qGetCurrentDirectory :: m FilePath
+  qGetDirectoryContents :: FilePath -> m [FilePath]
+  qCreateDirectoryIfMissing :: Bool -> FilePath -> m ()
+  qCanonicalizePath :: FilePath -> m FilePath
+
+  qGetAccessTime :: FilePath -> m UTCTime
+  qGetModificationTime :: FilePath -> m UTCTime
+
+  -- System.IO
+  qReadFile :: FilePath -> m String
+  qWriteFile :: FilePath -> String -> m ()
+  qAppendFile :: FilePath -> String -> m ()
+
+  qRemoveFile :: FilePath -> m ()
+
+  -- Data.ByteString
+  qReadFileBS :: FilePath -> m ByteString
+  qWriteFileBS :: FilePath -> ByteString -> m ()
+  qAppendFileBS :: FilePath -> ByteString -> m ()
+
 -----------------------------------------------------
 --      The IO instance of Quasi
 --
@@ -141,6 +178,27 @@ instance Quasi IO where
   qPutQ _               = badIO "putQ"
   qIsExtEnabled _       = badIO "isExtEnabled"
   qExtsEnabled          = badIO "extsEnabled"
+
+  qReadProcessWithExitCode _ _ _ = badIO "readProcessWithExitCode"
+
+  qFindExecutables _    = badIO "findExecutables"
+  qDoesFileExist _      = badIO "doesFileExist"
+  qDoesDirectoryExist _ = badIO "doesDirectoryExist"
+  qGetCurrentDirectory  = badIO "getCurrentDirectory"
+  qGetDirectoryContents _ = badIO "getDirectoryContents"
+  qCreateDirectoryIfMissing _ _ = badIO "createDirectoryIfMissing"
+  qCanonicalizePath _   = badIO "canonicalizePath"
+  qGetAccessTime _      = badIO "getAccessTime"
+  qGetModificationTime _ = badIO "getModificationTime"
+
+  qReadFile _           = badIO "readFile"
+  qWriteFile _ _        = badIO "writeFile"
+  qAppendFile _ _       = badIO "appendFile"
+  qRemoveFile _         = badIO "removeFile"
+
+  qReadFileBS _         = badIO "readFileBS"
+  qWriteFileBS _ _      = badIO "writeFileBS"
+  qAppendFileBS _ _     = badIO "appendFileBS"
 
   qRunIO m = m
 
@@ -508,6 +566,64 @@ isExtEnabled ext = Q (qIsExtEnabled ext)
 extsEnabled :: Q [Extension]
 extsEnabled = Q qExtsEnabled
 
+-- | @System.Process@ support.
+readProcessWithExitCode :: FilePath
+                        -> [String]
+                        -> String
+                        -> Q (ExitCode, String, String)
+readProcessWithExitCode a b c = Q (qReadProcessWithExitCode a b c)
+
+-- | @System.Directory@ support.
+findExecutables :: String -> Q [FilePath]
+findExecutables n = Q (qFindExecutables n)
+
+doesFileExist :: FilePath -> Q Bool
+doesFileExist p = Q (qDoesFileExist p)
+
+doesDirectoryExist :: FilePath -> Q Bool
+doesDirectoryExist p = Q (qDoesDirectoryExist p)
+
+getCurrentDirectory :: Q FilePath
+getCurrentDirectory = Q qGetCurrentDirectory
+
+getDirectoryContents :: FilePath -> Q [FilePath]
+getDirectoryContents p = Q (qGetDirectoryContents p)
+
+createDirectoryIfMissing :: Bool -> FilePath -> Q ()
+createDirectoryIfMissing b p = Q (qCreateDirectoryIfMissing b p)
+
+canonicalizePath :: FilePath -> Q FilePath
+canonicalizePath p = Q (qCanonicalizePath p)
+
+getAccessTime :: FilePath -> Q UTCTime
+getAccessTime p = Q (qGetAccessTime p)
+
+getModificationTime :: FilePath -> Q UTCTime
+getModificationTime p = Q (qGetModificationTime p)
+
+-- | @System.IO@ support.
+readFile :: FilePath -> Q String
+readFile p = Q (qReadFile p) --runIO . File.readFile
+
+writeFile :: FilePath -> String -> Q ()
+writeFile p d = Q (qWriteFile p d)
+
+appendFile :: FilePath -> String -> Q ()
+appendFile p d = Q (qAppendFile p d)
+
+removeFile :: FilePath -> Q ()
+removeFile p = Q (qRemoveFile p)
+
+-- | @Data.ByteString@ support.
+readFileBS :: FilePath -> Q ByteString
+readFileBS p = Q (qReadFileBS p)
+
+writeFileBS :: FilePath -> ByteString -> Q ()
+writeFileBS p d = Q (qWriteFileBS p d)
+
+appendFileBS :: FilePath -> ByteString -> Q ()
+appendFileBS p d = Q (qAppendFileBS p d)
+
 instance Quasi Q where
   qNewName            = newName
   qReport             = report
@@ -531,6 +647,27 @@ instance Quasi Q where
   qIsExtEnabled       = isExtEnabled
   qExtsEnabled        = extsEnabled
 
+  qReadProcessWithExitCode = readProcessWithExitCode
+
+  qFindExecutables    = findExecutables
+  qDoesFileExist      = doesFileExist
+  qDoesDirectoryExist = doesDirectoryExist
+  qGetCurrentDirectory = getCurrentDirectory
+  qGetDirectoryContents = getDirectoryContents
+  qCreateDirectoryIfMissing = createDirectoryIfMissing
+  qCanonicalizePath   = canonicalizePath
+  qGetAccessTime      = getAccessTime
+  qGetModificationTime = getModificationTime
+
+  qReadFile           = Language.Haskell.TH.Syntax.readFile
+  qWriteFile          = Language.Haskell.TH.Syntax.writeFile
+  qAppendFile         = Language.Haskell.TH.Syntax.appendFile
+
+  qReadFileBS         = readFileBS
+  qWriteFileBS        = writeFileBS
+  qAppendFileBS       = appendFileBS
+
+  qRemoveFile         = Language.Haskell.TH.Syntax.removeFile
 
 ----------------------------------------------------
 -- The following operations are used solely in DsMeta when desugaring brackets

@@ -1,8 +1,20 @@
 # Changelog for [`template-haskell` package](http://hackage.haskell.org/package/template-haskell)
 
 ## 2.13.0.0 *TBA*
-
   * Bundled with GHC *TBA*
+
+  * Add support for declarative file and process IO:
+    - `readProcessWithExitCode`
+    - `findExecutables`
+    - `doesFileExist`
+    - `doesDirectoryExist`
+    - `getCurrentDirectory`
+    - `getDirectoryContents`
+    - `createDirectoryIfMissing`
+    - `canonicalizePath`
+    - `getAccessTime` and `getModificationTime`
+    - `readFile` and `writeFile`
+    - `readFileBS` and `writeFileBS`
 
   * Add support for overloaded labels. Introduces `labelE :: String -> ExpQ`.
 

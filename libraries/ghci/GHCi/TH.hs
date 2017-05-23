@@ -205,6 +205,27 @@ instance TH.Quasi GHCiQ where
   qIsExtEnabled x = ghcCmd (IsExtEnabled x)
   qExtsEnabled = ghcCmd ExtsEnabled
 
+  qReadProcessWithExitCode a b c = ghcCmd (ReadProcessWithExitCode a b c)
+  qFindExecutables p             = ghcCmd (FindExecutables p)
+  qDoesFileExist p               = ghcCmd (DoesFileExist p)
+  qDoesDirectoryExist p          = ghcCmd (DoesDirectoryExist p)
+  qGetCurrentDirectory           = ghcCmd GetCurrentDirectry
+  qGetDirectoryContents p        = ghcCmd (GetDirectoryContents p)
+  qCreateDirectoryIfMissing i p  = ghcCmd (CreateDirectoryIfMissing i p)
+  qCanonicalizePath p            = ghcCmd (CanonicalizePath p)
+  qGetAccessTime p               = ghcCmd (GetAccessTime p)
+  qGetModificationTime p         = ghcCmd (GetModificationTime p)
+
+  qReadFile p                    = ghcCmd (ReadFile p)
+  qWriteFile p c                 = ghcCmd (WriteFile p c)
+  qAppendFile p c                = ghcCmd (AppendFile p c)
+
+  qReadFileBS p                  = ghcCmd (ReadFileBS p)
+  qWriteFileBS p c               = ghcCmd (WriteFileBS p c)
+  qAppendFileBS p c              = ghcCmd (AppendFileBS p c)
+
+  qRemoveFile p                  = ghcCmd (RemoveFile p)
+
 -- | The implementation of the 'StartTH' message: create
 -- a new IORef QState, and return a RemoteRef to it.
 startTH :: IO (RemoteRef (IORef QState))
