@@ -237,13 +237,10 @@ AC_DEFUN([FPTOOLS_SET_HASKELL_PLATFORM_VARS],
 
     checkOS() {
         case [$]1 in
-        linux)
+        linux|linux-android)
             test -z "[$]2" || eval "[$]2=OSLinux"
             ;;
-        ios)
-            test -z "[$]2" || eval "[$]2=OSiOS"
-            ;;
-        darwin)
+        darwin|ios)
             test -z "[$]2" || eval "[$]2=OSDarwin"
             ;;
         solaris2)
@@ -278,9 +275,6 @@ AC_DEFUN([FPTOOLS_SET_HASKELL_PLATFORM_VARS],
             ;;
         aix)
             test -z "[$]2" || eval "[$]2=OSAIX"
-            ;;
-        linux-android)
-            test -z "[$]2" || eval "[$]2=OSAndroid"
             ;;
         *)
             echo "Unknown OS '[$]1'"
@@ -476,6 +470,7 @@ AC_DEFUN([FP_SETTINGS],
         SettingsHaskellCPPFlags="$HaskellCPPArgs"
         SettingsLdCommand="\$topdir/../${mingw_bin_prefix}ld.exe"
         SettingsArCommand="\$topdir/../${mingw_bin_prefix}ar.exe"
+        SettingsRanlibCommand="\$topdir/../${mingw_bin_prefix}ranlib.exe"
         SettingsPerlCommand='$topdir/../perl/perl.exe'
         SettingsDllWrapCommand="\$topdir/../${mingw_bin_prefix}dllwrap.exe"
         SettingsWindresCommand="\$topdir/../${mingw_bin_prefix}windres.exe"
@@ -498,6 +493,7 @@ AC_DEFUN([FP_SETTINGS],
         SettingsHaskellCPPFlags="$HaskellCPPArgs"
         SettingsLdCommand="$LdCmd"
         SettingsArCommand="$ArCmd"
+        SettingsRanlibCommand="$RanlibCmd"
         SettingsPerlCommand="$PerlCmd"
         if test -z "$DllWrapCmd"
         then
@@ -518,6 +514,12 @@ AC_DEFUN([FP_SETTINGS],
       SettingsLibtoolCommand="libtool"
     else
       SettingsLibtoolCommand="$LibtoolCmd"
+    fi
+    if test -z "$ClangCmd"
+    then
+        SettingsClangCommand="clang"
+    else
+        SettingsClangCommand="$ClangCmd"
     fi
     if test -z "$LlcCmd"
     then
@@ -544,11 +546,13 @@ AC_DEFUN([FP_SETTINGS],
     AC_SUBST(SettingsLdCommand)
     AC_SUBST(SettingsLdFlags)
     AC_SUBST(SettingsArCommand)
+    AC_SUBST(SettingsRanlibCommand)
     AC_SUBST(SettingsPerlCommand)
     AC_SUBST(SettingsDllWrapCommand)
     AC_SUBST(SettingsWindresCommand)
     AC_SUBST(SettingsLibtoolCommand)
     AC_SUBST(SettingsTouchCommand)
+    AC_SUBST(SettingsClangCommand)
     AC_SUBST(SettingsLlcCommand)
     AC_SUBST(SettingsOptCommand)
 ])

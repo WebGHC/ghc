@@ -1016,13 +1016,14 @@ test('T12227',
 test('T12425',
      [ only_ways(['optasm']),
        compiler_stats_num_field('bytes allocated',
-          [(wordsize(64), 127500136, 5),
+          [(wordsize(64), 134780272, 5),
           # initial:      125831400
           # 2017-01-18:   133380960  Allow top-level string literals in Core
           # 2017-02-17:   153611448  Type-indexed Typeable
           # 2017-03-03:   142256192  Share Typeable KindReps
           # 2017-03-21:   134334800  Unclear
           # 2017-04-28:   127500136  Remove exponential behaviour in simplifier
+          # 2017-05-23:   134780272  Addition of llvm-targets in dynflags (D3352)
           ]),
      ],
      compile,
@@ -1062,13 +1063,14 @@ test('T12545',
 test('T13035',
      [ only_ways(['normal']),
        compiler_stats_num_field('bytes allocated',
-          [(wordsize(64), 93249744, 5),
+          [(wordsize(64), 98550464, 5),
           # 2017-01-05   90595208  initial
           # 2017-01-19   95269000  Allow top-level string literals in Core
           # 2017-02-05   88806416  Probably OccAnal fixes
           # 2017-02-17   103890200 Type-indexed Typeable
           # 2017-02-25   98390488  Early inline patch
           # 2017-03-21   93249744  It's unclear
+          # 2017-05-23   98550464  Addition of llvm-targets in dynflags (D3352)
           ]),
      ],
      compile,

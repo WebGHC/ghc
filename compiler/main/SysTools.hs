@@ -13,12 +13,14 @@
 module SysTools (
         -- Initialisation
         initSysTools,
+        initLlvmTargets,
 
         -- Interface to system tools
         runUnlit, runCpp, runCc, -- [Option] -> IO ()
         runPp,                   -- [Option] -> IO ()
         runSplit,                -- [Option] -> IO ()
         runAs, runLink, runLibtool, -- [Option] -> IO ()
+        runAr, askAr, runRanlib,
         runMkDLL,
         runWindres,
         runLlvmOpt,
@@ -171,6 +173,20 @@ stuff.
 ************************************************************************
 -}
 
+initLlvmTargets :: Maybe String
+                -> IO LlvmTargets
+initLlvmTargets mbMinusB
+  = do top_dir <- findTopDir mbMinusB
+       let llvmTargetsFile = top_dir </> "llvm-targets"
+       llvmTargetsStr <- readFile llvmTargetsFile
+       case maybeReadFuzzy llvmTargetsStr of
+         Just s -> return (fmap mkLlvmTarget <$> s)
+         Nothing -> pgmError ("Can't parse " ++ show llvmTargetsFile)
+  where
+    mkLlvmTarget :: (String, String, String) -> LlvmTarget
+    mkLlvmTarget (dl, cpu, attrs) = LlvmTarget dl cpu (words attrs)
+
+
 initSysTools :: Maybe String    -- Maybe TopDir path (without the '-B' prefix)
              -> IO Settings     -- Set all the mutable variables above, holding
                                 --      (a) the system programs
@@ -274,6 +290,8 @@ initSysTools mbMinusB
 
        windres_path <- getSetting "windres command"
        libtool_path <- getSetting "libtool command"
+       ar_path <- getSetting "ar command"
+       ranlib_path <- getSetting "ranlib command"
 
        tmpdir <- getTemporaryDirectory
 
@@ -306,6 +324,7 @@ initSysTools mbMinusB
        -- We just assume on command line
        lc_prog <- getSetting "LLVM llc command"
        lo_prog <- getSetting "LLVM opt command"
+       lcc_prog <- getSetting "LLVM clang command"
 
        let iserv_prog = libexec "ghc-iserv"
 
@@ -347,8 +366,11 @@ initSysTools mbMinusB
                     sPgm_T   = touch_path,
                     sPgm_windres = windres_path,
                     sPgm_libtool = libtool_path,
+                    sPgm_ar = ar_path,
+                    sPgm_ranlib = ranlib_path,
                     sPgm_lo  = (lo_prog,[]),
                     sPgm_lc  = (lc_prog,[]),
+                    sPgm_lcc = (lcc_prog,[]),
                     sPgm_i   = iserv_prog,
                     sOpt_L       = [],
                     sOpt_P       = [],
@@ -357,6 +379,7 @@ initSysTools mbMinusB
                     sOpt_a       = [],
                     sOpt_l       = [],
                     sOpt_windres = [],
+                    sOpt_lcc     = [],
                     sOpt_lo      = [],
                     sOpt_lc      = [],
                     sOpt_i       = [],
@@ -398,7 +421,7 @@ runCpp dflags args =   do
                 ++ [Option "-Wundef" | wopt Opt_WarnCPPUndef dflags]
   mb_env <- getGccEnv args2
   runSomethingFiltered dflags id  "C pre-processor" p
-                       (args0 ++ args1 ++ args2 ++ args) mb_env
+                       (args0 ++ args1 ++ args2 ++ args) Nothing mb_env
 
 runPp :: DynFlags -> [Option] -> IO ()
 runPp dflags args =   do
@@ -550,7 +573,7 @@ runAs dflags args = do
       args1 = map Option (getOpts dflags opt_a)
       args2 = args0 ++ args1 ++ args
   mb_env <- getGccEnv args2
-  runSomethingFiltered dflags id "Assembler" p args2 mb_env
+  runSomethingFiltered dflags id "Assembler" p args2 Nothing mb_env
 
 -- | Run the LLVM Optimiser
 runLlvmOpt :: DynFlags -> [Option] -> IO ()
@@ -571,8 +594,7 @@ runLlvmLlc dflags args = do
 -- assembler)
 runClang :: DynFlags -> [Option] -> IO ()
 runClang dflags args = do
-  -- we simply assume its available on the PATH
-  let clang = "clang"
+  let (clang,_) = pgm_lcc dflags
       -- be careful what options we call clang with
       -- see #5903 and #7617 for bugs caused by this.
       (_,args0) = pgm_a dflags
@@ -580,7 +602,7 @@ runClang dflags args = do
       args2 = args0 ++ args1 ++ args
   mb_env <- getGccEnv args2
   Exception.catch (do
-        runSomethingFiltered dflags id "Clang (Assembler)" clang args2 mb_env
+        runSomethingFiltered dflags id "Clang (Assembler)" clang args2 Nothing mb_env
     )
     (\(err :: SomeException) -> do
         errorMsg dflags $
@@ -802,9 +824,6 @@ getLinkerInfo' dflags = do
                  -- that doesn't support --version. We can just assume that's
                  -- what we're using.
                  return $ DarwinLD []
-               OSiOS ->
-                 -- Ditto for iOS
-                 return $ DarwinLD []
                OSMinGW32 ->
                  -- GHC doesn't support anything but GNU ld on Windows anyway.
                  -- Process creation is also fairly expensive on win32, so
@@ -962,14 +981,30 @@ runLibtool dflags args = do
       args2      = [Option "-static"] ++ args1 ++ args ++ linkargs
       libtool    = pgm_libtool dflags
   mb_env <- getGccEnv args2
-  runSomethingFiltered dflags id "Linker" libtool args2 mb_env
+  runSomethingFiltered dflags id "Linker" libtool args2 Nothing mb_env
+
+runAr :: DynFlags -> Maybe FilePath -> [Option] -> IO ()
+runAr dflags cwd args = do
+  let ar = pgm_ar dflags
+  runSomethingFiltered dflags id "Ar" ar args cwd Nothing
+
+askAr :: DynFlags -> Maybe FilePath -> [Option] -> IO String
+askAr dflags mb_cwd args = do
+  let ar = pgm_ar dflags
+  runSomethingWith dflags "Ar" ar args $ \real_args ->
+    readCreateProcessWithExitCode' (proc ar real_args){ cwd = mb_cwd }
+
+runRanlib :: DynFlags -> [Option] -> IO ()
+runRanlib dflags args = do
+  let ranlib = pgm_ranlib dflags
+  runSomethingFiltered dflags id "Ranlib" ranlib args Nothing Nothing
 
 runMkDLL :: DynFlags -> [Option] -> IO ()
 runMkDLL dflags args = do
   let (p,args0) = pgm_dll dflags
       args1 = args0 ++ args
   mb_env <- getGccEnv (args0++args)
-  runSomethingFiltered dflags id "Make DLL" p args1 mb_env
+  runSomethingFiltered dflags id "Make DLL" p args1 Nothing mb_env
 
 runWindres :: DynFlags -> [Option] -> IO ()
 runWindres dflags args = do
@@ -992,7 +1027,7 @@ runWindres dflags args = do
             : Option "--use-temp-file"
             : args
   mb_env <- getGccEnv gcc_args
-  runSomethingFiltered dflags id "Windres" windres args' mb_env
+  runSomethingFiltered dflags id "Windres" windres args' Nothing mb_env
 
 touch :: DynFlags -> String -> String -> IO ()
 touch dflags purpose arg =
@@ -1034,7 +1069,7 @@ runSomething :: DynFlags
              -> IO ()
 
 runSomething dflags phase_name pgm args =
-  runSomethingFiltered dflags id phase_name pgm args Nothing
+  runSomethingFiltered dflags id phase_name pgm args Nothing Nothing
 
 -- | Run a command, placing the arguments in an external response file.
 --
@@ -1053,7 +1088,7 @@ runSomethingResponseFile dflags filter_fn phase_name pgm args mb_env =
     runSomethingWith dflags phase_name pgm args $ \real_args -> do
         fp <- getResponseFile real_args
         let args = ['@':fp]
-        r <- builderMainLoop dflags filter_fn pgm args mb_env
+        r <- builderMainLoop dflags filter_fn pgm args Nothing mb_env
         return (r,())
   where
     getResponseFile args = do
@@ -1094,11 +1129,11 @@ runSomethingResponseFile dflags filter_fn phase_name pgm args mb_env =
 
 runSomethingFiltered
   :: DynFlags -> (String->String) -> String -> String -> [Option]
-  -> Maybe [(String,String)] -> IO ()
+  -> Maybe FilePath -> Maybe [(String,String)] -> IO ()
 
-runSomethingFiltered dflags filter_fn phase_name pgm args mb_env = do
+runSomethingFiltered dflags filter_fn phase_name pgm args mb_cwd mb_env = do
     runSomethingWith dflags phase_name pgm args $ \real_args -> do
-        r <- builderMainLoop dflags filter_fn pgm real_args mb_env
+        r <- builderMainLoop dflags filter_fn pgm real_args mb_cwd mb_env
         return (r,())
 
 runSomethingWith
@@ -1130,11 +1165,11 @@ handleProc pgm phase_name proc = do
 
 
 builderMainLoop :: DynFlags -> (String -> String) -> FilePath
-                -> [String] -> Maybe [(String, String)]
+                -> [String] -> Maybe FilePath -> Maybe [(String, String)]
                 -> IO ExitCode
-builderMainLoop dflags filter_fn pgm real_args mb_env = do
+builderMainLoop dflags filter_fn pgm real_args mv_cwd mb_env = do
   chan <- newChan
-  (hStdIn, hStdOut, hStdErr, hProcess) <- runInteractiveProcess pgm real_args Nothing mb_env
+  (hStdIn, hStdOut, hStdErr, hProcess) <- runInteractiveProcess pgm real_args mv_cwd mb_env
 
   -- and run a loop piping the output from the compiler to the log_action in DynFlags
   hSetBuffering hStdOut LineBuffering
@@ -1455,7 +1490,7 @@ linkDynLib dflags0 o_files dep_packages
                  ++ pkg_lib_path_opts
                  ++ pkg_link_opts
                 ))
-        _ | os `elem` [OSDarwin, OSiOS] -> do
+        _ | os == OSDarwin -> do
             -------------------------------------------------------------------
             -- Making a darwin dylib
             -------------------------------------------------------------------
