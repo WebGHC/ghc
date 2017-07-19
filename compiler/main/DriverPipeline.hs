@@ -69,7 +69,7 @@ import System.Directory
 import System.FilePath
 import System.IO
 import Control.Monad
-import Data.List        ( isSuffixOf, intercalate )
+import Data.List        ( isSuffixOf, isPrefixOf, intercalate )
 import Data.Maybe
 import Data.Version
 
@@ -2141,8 +2141,10 @@ linkStaticLib dflags o_files dep_packages = do
   -- create an archive by combining all the archives.
   forM_ archives $ \archive -> do
     let archive_fp = SysTools.FileOption "" archive
-    modules <- words <$> askAr dflags Nothing [ SysTools.Option "t"
-                                              , archive_fp ]
+    -- skip virtual "SYMDEF" symbol tables.
+    modules <- filter (not . isPrefixOf "__.SYMDEF") . lines
+               <$> askAr dflags Nothing [ SysTools.Option "t"
+                                        , archive_fp ]
     -- if the archive is non empty
     (unless $ null modules) $ do
       withSystemTempDirectory "staticlib-" $ \tmpdir -> do
