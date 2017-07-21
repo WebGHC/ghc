@@ -2126,7 +2126,9 @@ linkDynLibCheck dflags o_files dep_packages
 -- will still need to be linked with any remaining link flags.
 linkStaticLib :: DynFlags -> [String] -> [InstalledUnitId] -> IO ()
 linkStaticLib dflags o_files dep_packages = do
-  let output_fn = exeFileName True dflags
+  let extra_ld_inputs = [ f | FileOption _ f <- ldInputs dflags ]
+      modules = o_files ++ extra_ld_inputs
+      output_fn = exeFileName True dflags
 
   full_output_fn <- if isAbsolute output_fn
                     then return output_fn
@@ -2152,10 +2154,11 @@ linkStaticLib dflags o_files dep_packages = do
         runAr dflags (Just tmpdir) $ [ SysTools.Option "q"
                                      , SysTools.FileOption "" full_output_fn]
                                      ++ map (SysTools.FileOption "") modules
-  -- add the o_files last.
-  runAr dflags Nothing $ [ SysTools.Option "q"
-                         , SysTools.FileOption "" full_output_fn ]
-                         ++ map (SysTools.FileOption "") o_files
+  (unless $ null modules) $ do
+    -- add the o_files and extra_ld_inputs last.
+    runAr dflags Nothing $ [ SysTools.Option "q"
+                           , SysTools.FileOption "" full_output_fn ]
+                           ++ map (SysTools.FileOption "") modules
 
 -- -----------------------------------------------------------------------------
 -- Running CPP
