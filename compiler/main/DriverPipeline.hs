@@ -63,13 +63,14 @@ import TcRnTypes
 import Hooks
 import qualified GHC.LanguageExtensions as LangExt
 import FileCleanup
+import Ar
 
 import Exception
 import System.Directory
 import System.FilePath
 import System.IO
 import Control.Monad
-import Data.List        ( isSuffixOf, isPrefixOf, intercalate )
+import Data.List        ( isSuffixOf, intercalate )
 import Data.Maybe
 import Data.Version
 
@@ -2140,25 +2141,16 @@ linkStaticLib dflags o_files dep_packages = do
   pkg_cfgs <- getPreloadPackagesAnd dflags dep_packages
   archives <- concat <$> mapM (collectArchives dflags) pkg_cfgs
 
-  -- create an archive by combining all the archives.
-  forM_ archives $ \archive -> do
-    let archive_fp = SysTools.FileOption "" archive
-    -- skip virtual "SYMDEF" symbol tables.
-    modules <- filter (not . isPrefixOf "__.SYMDEF") . lines
-               <$> askAr dflags Nothing [ SysTools.Option "t"
-                                        , archive_fp ]
-    -- if the archive is non empty
-    (unless $ null modules) $ do
-      withSystemTempDirectory "staticlib-" $ \tmpdir -> do
-        runAr dflags (Just tmpdir) [ SysTools.Option "x" , archive_fp ]
-        runAr dflags (Just tmpdir) $ [ SysTools.Option "q"
-                                     , SysTools.FileOption "" full_output_fn]
-                                     ++ map (SysTools.FileOption "") modules
-  (unless $ null modules) $ do
-    -- add the o_files and extra_ld_inputs last.
-    runAr dflags Nothing $ [ SysTools.Option "q"
-                           , SysTools.FileOption "" full_output_fn ]
-                           ++ map (SysTools.FileOption "") modules
+  ar <- foldl mappend
+        <$> (Archive <$> mapM loadObj modules)
+        <*> mapM loadAr archives
+
+  if sLdIsGnuLd (settings dflags)
+    then writeGNUAr output_fn $ afilter (not . isGNUSymdef) ar
+    else writeBSDAr output_fn $ afilter (not . isBSDSymdef) ar
+
+  -- run ranlib over the archive. write*Ar does *not* create the symbol index.
+  runRanlib dflags [SysTools.FileOption "" output_fn]
 
 -- -----------------------------------------------------------------------------
 -- Running CPP

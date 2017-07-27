@@ -2,7 +2,7 @@
 module Ar
   (ArchiveEntry(..)
   ,Archive(..)
-  ,filtera
+  ,afilter
   
   ,parseAr
   
@@ -20,10 +20,8 @@ import Data.List (mapAccumL, isPrefixOf)
 import Data.Monoid ((<>))
 import Data.Binary.Get
 import Data.Binary.Put
-import Data.Binary
 import Control.Monad
 import Control.Applicative
-import qualified Data.Map as M
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as C
 import qualified Data.ByteString.Lazy as L
@@ -43,8 +41,8 @@ data ArchiveEntry = ArchiveEntry
 newtype Archive = Archive [ArchiveEntry]
         deriving (Eq, Show, Monoid)
 
-filtera :: (ArchiveEntry -> Bool) -> Archive -> Archive
-filtera f (Archive xs) = Archive (filter f xs)
+afilter :: (ArchiveEntry -> Bool) -> Archive -> Archive
+afilter f (Archive xs) = Archive (filter f xs)
 
 isBSDSymdef, isGNUSymdef :: ArchiveEntry -> Bool
 isBSDSymdef a = "__.SYMDEF" `isPrefixOf` (filename a)
@@ -60,12 +58,12 @@ putPaddedInt padding i = putPaddedString '\x20' padding (show i)
 putPaddedString :: Char -> Int -> String -> Put
 putPaddedString pad padding s = putByteString . C.pack . take padding $ s `mappend` (repeat pad)
 
+getBSDArchEntries :: Get [ArchiveEntry]
 getBSDArchEntries = do
     empty <- isEmpty
     if empty then
         return []
      else do
-        offset  <- liftM fromIntegral bytesRead :: Get Int 
         name    <- getByteString 16
         when ('/' `C.elem` name && C.take 3 name /= "#1/") $ 
           fail "Looks like GNU Archive"
@@ -101,7 +99,6 @@ getGNUArchEntries extInfo = do
     then return []
     else
     do
-      offset  <- fromIntegral <$> bytesRead
       name    <- getByteString 16
       time    <- getPaddedInt <$> getByteString 12
       own     <- getPaddedInt <$> getByteString 6
@@ -133,6 +130,7 @@ getGNUArchEntries extInfo = do
 -- have been preprocessed to account for the extenden file name
 -- table section "//" e.g. for GNU Archives. Or that the names
 -- have been move into the payload for BSD Archives.
+putArchEntry :: ArchiveEntry -> PutM ()
 putArchEntry (ArchiveEntry name time own grp mode st_size file) = do
   putPaddedString ' '  16 name
   putPaddedInt         12 time
@@ -147,18 +145,22 @@ putArchEntry (ArchiveEntry name time own grp mode st_size file) = do
   where
     pad         = st_size `mod` 2 
 
+getArchMagic :: Get ()
 getArchMagic = do
   magic <- liftM C.unpack $ getByteString 8
   if magic /= "!<arch>\n"
     then fail $ "Invalid magic number " ++ show magic
     else return ()
 
+putArchMagic :: Put
 putArchMagic = putByteString $ C.pack "!<arch>\n"
 
+getArch :: Get Archive
 getArch = Archive <$> do
   getArchMagic
   getBSDArchEntries <|> getGNUArchEntries Nothing 
 
+putBSDArch :: Archive -> PutM ()
 putBSDArch (Archive as) = do
   putArchMagic
   mapM_ putArchEntry (processEntries as)
@@ -170,7 +172,7 @@ putBSDArch (Archive as) = do
       (n, _) -> 4 * (n + 1)
     needExt name = length name > 16 || ' ' `elem` name
     processEntry :: ArchiveEntry -> ArchiveEntry
-    processEntry archive@(ArchiveEntry name time own grp mode st_size file)
+    processEntry archive@(ArchiveEntry name _ _ _ _ st_size _)
       | needExt name = archive { filename = "#1/" <> show sz
                                , filedata = C.pack (padStr '\0' sz name) <> filedata archive
                                , filesize = st_size + sz }
@@ -180,13 +182,14 @@ putBSDArch (Archive as) = do
 
     processEntries = map processEntry
 
+putGNUArch :: Archive -> PutM ()
 putGNUArch (Archive as) = do
   putArchMagic
   mapM_ putArchEntry (processEntries as)
 
   where
     processEntry :: ArchiveEntry -> ArchiveEntry -> (ArchiveEntry, ArchiveEntry)
-    processEntry extInfo archive@(ArchiveEntry name time own grp mode st_size file)
+    processEntry extInfo archive@(ArchiveEntry name _ _ _ _ _ _)
       | length name > 15 = ( extInfo { filesize = filesize extInfo + length name + 2
                                     ,  filedata = filedata extInfo <>  C.pack name <> "/\n" }
                            , archive { filename = "/" <> show (filesize extInfo) } )
@@ -198,6 +201,7 @@ putGNUArch (Archive as) = do
 parseAr :: B.ByteString -> Archive
 parseAr = runGet getArch . L.fromChunks . pure
 
+writeBSDAr, writeGNUAr :: FilePath -> Archive -> IO ()
 writeBSDAr fp = L.writeFile fp . runPut . putBSDArch
 writeGNUAr fp = L.writeFile fp . runPut . putGNUArch
 
@@ -219,7 +223,7 @@ loadObj fp = do
 
 oct2dec :: Int -> Int
 oct2dec = foldl (\a b -> a * 10 + b) 0 . reverse . dec 8
-  where dec b 0 = []
+  where dec _ 0 = []
         dec b i = let (rest, last) = i `quotRem` b
                   in last:dec b rest
 
