@@ -118,7 +118,7 @@ case $maybe_os in
   linux-musl* | linux-uclibc* | uclinux-uclibc* | uclinux-gnu* | kfreebsd*-gnu* | \
   knetbsd*-gnu* | netbsd*-gnu* | netbsd*-eabi* | \
   kopensolaris*-gnu* | cloudabi*-eabi* | \
-  storm-chaos* | os2-emx* | rtmk-nova*)
+  storm-chaos* | os2-emx* | rtmk-nova* | unknown-wasm)
     os=-$maybe_os
     basic_machine=`echo $1 | sed 's/^\(.*\)-\([^-]*-[^-]*\)$/\1/'`
     ;;
@@ -1550,6 +1550,8 @@ case $os in
 	-nacl*)
 		;;
 	-ios)
+		;;
+	-unknown-wasm)
 		;;
 	-none)
 		;;
