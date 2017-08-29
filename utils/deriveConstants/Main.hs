@@ -27,17 +27,18 @@ needing to run the program, by inspecting the object file using 'nm'.
 
 import Control.Monad (when, unless)
 import Data.Bits (shiftL)
-import Data.Char (toLower)
+import Data.Char (toLower, isSpace, isDigit)
 import Data.List (stripPrefix)
 import Data.Map (Map)
 import qualified Data.Map as Map
-import Data.Maybe (catMaybes)
+import Data.Maybe (catMaybes, mapMaybe)
 import Numeric (readHex)
 import System.Environment (getArgs)
 import System.Exit (ExitCode(ExitSuccess), exitFailure)
 import System.FilePath ((</>))
 import System.IO (stderr, hPutStrLn)
 import System.Process (showCommandForUser, readProcess, rawSystem)
+import Text.Read (readMaybe)
 
 main :: IO ()
 main = do opts <- parseArgs
@@ -687,17 +688,26 @@ getWanted verbose os tmpdir gccProgram gccFlags nmProgram mobjdumpProgram
     = do let cStuff = unlines (headers ++ concatMap (doWanted . snd) (wanteds os))
              cFile = tmpdir </> "tmp.c"
              oFile = tmpdir </> "tmp.o"
+             -- llvm-nm doesn't work with wasm yet, and it's not clear
+             -- if it would be reasonable to fix. -flto doesn't work
+             -- with the wasm lld driver yet, but it does successfully
+             -- output valid LLVM bitcode. llvm-nm doesn't work on files
+             -- generated with lto, but we can use llvm-dis to inspect 
+             -- this bitcode for the same information that we would normally get via nm.
+             wasmOptions = if os == "unknown_wasm" then ["-flto"] else []
          writeFile cFile cStuff
-         execute verbose gccProgram (gccFlags ++ ["-c", cFile, "-o", oFile])
+         execute verbose gccProgram (gccFlags ++ wasmOptions ++ ["-c", cFile, "-o", oFile])
          xs <- case os of
-                 "openbsd" -> readProcess objdumpProgam ["--syms", oFile] ""
-                 "aix"     -> readProcess objdumpProgam ["--syms", oFile] ""
-                 _         -> readProcess nmProgram ["-P", oFile] ""
+                 "openbsd"      -> readProcess objdumpProgam ["--syms", oFile] ""
+                 "aix"          -> readProcess objdumpProgam ["--syms", oFile] ""
+                 "unknown_wasm" -> execute verbose "llvm-dis" [oFile, "-o", "tmp.ll"] >> readProcess "cat" ["tmp.ll"] ""
+                 _              -> readProcess nmProgram ["-P", oFile] ""
 
          let ls = lines xs
              m = Map.fromList $ case os of
-                 "aix" -> parseAixObjdump ls
-                 _     -> catMaybes $ map parseNmLine ls
+                 "aix"          -> parseAixObjdump ls
+                 "unknown_wasm" -> parseWasmLLVMDis ls
+                 _              -> catMaybes $ map parseNmLine ls
 
          case Map.lookup "CONTROL_GROUP_CONST_291" m of
              Just 292   -> return () -- OK
@@ -814,6 +824,15 @@ getWanted verbose os tmpdir gccProgram gccFlags nmProgram mobjdumpProgram
                   | otherwise = Nothing
                 where
                   [sym0, _] = take 2 (reverse $ words l1)
+
+          parseWasmLLVMDis :: [String] -> [(String,Integer)]
+          parseWasmLLVMDis = mapMaybe f
+            where
+              f line = do
+                line' <- stripPrefix "@derivedConstant" line
+                let name = takeWhile (not . isSpace) line'
+                n <- readMaybe $ takeWhile isDigit . drop 1 . dropWhile (/= '[') $ line'
+                return (name, n)
 
           -- If an Int value is larger than 2^28 or smaller
           -- than -2^28, then fail.
