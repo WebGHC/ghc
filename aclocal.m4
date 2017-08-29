@@ -217,7 +217,7 @@ AC_DEFUN([FPTOOLS_SET_HASKELL_PLATFORM_VARS],
         mipsel)
             test -z "[$]2" || eval "[$]2=ArchMipsel"
             ;;
-        hppa|hppa1_1|ia64|m68k|nios2|riscv32|riscv64|rs6000|s390|s390x|sh4|vax)
+        hppa|hppa1_1|ia64|m68k|nios2|riscv32|riscv64|rs6000|s390|s390x|sh4|vax|wasm32)
             test -z "[$]2" || eval "[$]2=ArchUnknown"
             ;;
         *)
@@ -272,7 +272,7 @@ AC_DEFUN([FPTOOLS_SET_HASKELL_PLATFORM_VARS],
         nto-qnx)
             test -z "[$]2" || eval "[$]2=OSQNXNTO"
             ;;
-        dragonfly|hpux|linuxaout|freebsd2|nextstep2|nextstep3|sunos4|ultrix)
+        dragonfly|hpux|linuxaout|freebsd2|nextstep2|nextstep3|sunos4|ultrix|unknown-wasm)
             test -z "[$]2" || eval "[$]2=OSUnknown"
             ;;
         aix)
@@ -1964,6 +1964,9 @@ case "$1" in
   x86_64|amd64)
     $2="x86_64"
     ;;
+  wasm32)
+    $2="wasm32"
+    ;;
   *)
     echo "Unknown CPU $1"
     exit 1
@@ -2070,6 +2073,9 @@ AC_DEFUN([GHC_CONVERT_OS],[
         ;;
       nto-qnx*)
         $3="nto-qnx"
+        ;;
+      unknown-wasm)
+        $3="unknown-wasm"
         ;;
       *)
         echo "Unknown OS $1"
