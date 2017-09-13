@@ -178,7 +178,7 @@ includes_GHCCONSTANTS_HASKELL_EXPORTS = includes/dist-derivedconstants/header/GH
 INSTALL_LIBS += $(includes_GHCCONSTANTS_HASKELL_VALUE)
 
 DERIVE_CONSTANTS_FLAGS += --gcc-program "$(CC)"
-DERIVE_CONSTANTS_FLAGS += $(addprefix --gcc-flag$(space),$(includes_CC_OPTS) -fcommon)
+DERIVE_CONSTANTS_FLAGS += $(addprefix --gcc-flag$(space),$(includes_CC_OPTS))
 DERIVE_CONSTANTS_FLAGS += --nm-program "$(NM)"
 ifneq "$(OBJDUMP)" ""
 DERIVE_CONSTANTS_FLAGS += --objdump-program "$(OBJDUMP)"
@@ -229,4 +229,3 @@ install_includes :
 	    $(INSTALL_HEADER) $(INSTALL_OPTS) includes/$d/*.h "$(DESTDIR)$(ghcheaderdir)/$d/" && \
 	) true
 	$(INSTALL_HEADER) $(INSTALL_OPTS) $(includes_H_CONFIG) $(includes_H_PLATFORM) $(includes_H_VERSION) $(includes_DERIVEDCONSTANTS) "$(DESTDIR)$(ghcheaderdir)/"
-
