@@ -4064,6 +4064,10 @@ defaultFlags settings
 
     ++ concatMap (wayGeneralFlags platform) (defaultWays settings)
 
+    ++ (if platformArch platform == ArchUnknown
+          then [Opt_FastLlvm]
+          else [ ])
+
     where platform = sTargetPlatform settings
 
 default_PIC :: Platform -> [GeneralFlag]
