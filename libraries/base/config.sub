@@ -1516,6 +1516,8 @@ case $os in
 		;;
 	*-eabi)
 		;;
+	-unknown-wasm)
+		;;
 	*)
 		echo Invalid configuration \`"$1"\': system \`"$os"\' not recognized 1>&2
 		exit 1
