@@ -25,6 +25,7 @@ module CLabel (
         mkClosureTableLabel,
         mkBytesLabel,
 
+        mkLocalBlockLabel,
         mkLocalClosureLabel,
         mkLocalInfoTableLabel,
         mkLocalClosureTableLabel,
@@ -94,7 +95,7 @@ module CLabel (
         mkHpcTicksLabel,
 
         hasCAF,
-        needsCDecl, maybeAsmTemp, externallyVisibleCLabel,
+        needsCDecl, maybeLocalBlockLabel, externallyVisibleCLabel,
         isMathFun,
         isCFunctionLabel, isGcPtrLabel, labelDynamic,
 
@@ -110,6 +111,7 @@ import GhcPrelude
 
 import IdInfo
 import BasicTypes
+import {-# SOURCE #-} BlockId (BlockId, mkBlockId)
 import Packages
 import Module
 import Name
@@ -128,8 +130,8 @@ import PprCore ( {- instances -} )
 -- -----------------------------------------------------------------------------
 -- The CLabel type
 
-{-
-  | CLabel is an abstract type that supports the following operations:
+{- |
+  'CLabel' is an abstract type that supports the following operations:
 
   - Pretty printing
 
@@ -148,6 +150,25 @@ import PprCore ( {- instances -} )
     more than one declaration for any given label).
 
   - Converting an info table label into an entry label.
+
+  CLabel usage is a bit messy in GHC as they are used in a number of different
+  contexts:
+
+  - By the C-- AST to identify labels
+
+  - By the unregisterised C code generator ("PprC") for naming functions (hence
+    the name 'CLabel')
+
+  - By the native and LLVM code generators to identify labels
+
+  For extra fun, each of these uses a slightly different subset of constructors
+  (e.g. 'AsmTempLabel' and 'AsmTempDerivedLabel' are used only in the NCG and
+  LLVM backends).
+
+  In general, we use 'IdLabel' to represent Haskell things early in the
+  pipeline. However, later optimization passes will often represent blocks they
+  create with 'LocalBlockLabel' where there is no obvious 'Name' to hang off the
+  label.
 -}
 
 data CLabel
@@ -170,6 +191,14 @@ data CLabel
   | RtsLabel
         RtsLabelInfo
 
+  -- | A label associated with a block. These aren't visible outside of the
+  -- compilation unit in which they are defined. These are generally used to
+  -- name blocks produced by Cmm-to-Cmm passes and the native code generator,
+  -- where we don't have a 'Name' to associate the label to and therefore can't
+  -- use 'IdLabel'.
+  | LocalBlockLabel
+        {-# UNPACK #-} !Unique
+
   -- | A 'C' (or otherwise foreign) label.
   --
   | ForeignLabel
@@ -183,11 +212,13 @@ data CLabel
 
         FunctionOrData
 
-  -- | A family of labels related to a particular case expression.
-  -- | Local temporary label used for native (or LLVM) code generation
+  -- | Local temporary label used for native (or LLVM) code generation; must not
+  -- appear outside of these contexts. Use primarily for debug information
   | AsmTempLabel
         {-# UNPACK #-} !Unique
 
+  -- | A label \"derived\" from another 'CLabel' by the addition of a suffix.
+  -- Must not occur outside of the NCG or LLVM code generators.
   | AsmTempDerivedLabel
         CLabel
         FastString              -- suffix
@@ -246,6 +277,7 @@ instance Ord CLabel where
     compare b1 b2 `thenCmp`
     compare c1 c2
   compare (RtsLabel a1) (RtsLabel a2) = compare a1 a2
+  compare (LocalBlockLabel u1) (LocalBlockLabel u2) = nonDetCmpUnique u1 u2
   compare (ForeignLabel a1 b1 c1 d1) (ForeignLabel a2 b2 c2 d2) =
     compare a1 a2 `thenCmp`
     compare b1 b2 `thenCmp`
@@ -281,6 +313,8 @@ instance Ord CLabel where
   compare _ CmmLabel{} = GT
   compare RtsLabel{} _ = LT
   compare _ RtsLabel{} = GT
+  compare LocalBlockLabel{} _ = LT
+  compare _ LocalBlockLabel{} = GT
   compare ForeignLabel{} _ = LT
   compare _ ForeignLabel{} = GT
   compare AsmTempLabel{} _ = LT
@@ -335,7 +369,8 @@ data ForeignLabelSource
 pprDebugCLabel :: CLabel -> SDoc
 pprDebugCLabel lbl
  = case lbl of
-        IdLabel{}       -> ppr lbl <> (parens $ text "IdLabel")
+        IdLabel _ _ info-> ppr lbl <> (parens $ text "IdLabel"
+                                       <> whenPprDebug (text ":" <> text (show info)))
         CmmLabel pkg _name _info
          -> ppr lbl <> (parens $ text "CmmLabel" <+> ppr pkg)
 
@@ -375,7 +410,7 @@ data IdLabelInfo
                         -- instead of a closure entry-point.
                         -- See Note [Proc-point local block entry-point].
 
-  deriving (Eq, Ord)
+  deriving (Eq, Ord, Show)
 
 
 data RtsLabelInfo
@@ -495,6 +530,8 @@ mkCmmCodeLabel      pkg str     = CmmLabel pkg str CmmCode
 mkCmmDataLabel      pkg str     = CmmLabel pkg str CmmData
 mkCmmClosureLabel   pkg str     = CmmLabel pkg str CmmClosure
 
+mkLocalBlockLabel :: Unique -> CLabel
+mkLocalBlockLabel u = LocalBlockLabel u
 
 -- Constructing RtsLabels
 mkRtsPrimOpLabel :: PrimOp -> CLabel
@@ -563,6 +600,7 @@ isSomeRODataLabel (IdLabel _ _ ClosureTable) = True
 isSomeRODataLabel (IdLabel _ _ ConInfoTable) = True
 isSomeRODataLabel (IdLabel _ _ InfoTable) = True
 isSomeRODataLabel (IdLabel _ _ LocalInfoTable) = True
+isSomeRODataLabel (IdLabel _ _ BlockInfoTable) = True
 -- static reference tables defined in haskell (.hs)
 isSomeRODataLabel (IdLabel _ _ SRT) = True
 isSomeRODataLabel (SRTLabel _) = True
@@ -652,7 +690,7 @@ toSlowEntryLbl l = pprPanic "toSlowEntryLbl" (ppr l)
 toEntryLbl :: CLabel -> CLabel
 toEntryLbl (IdLabel n c LocalInfoTable)  = IdLabel n c LocalEntry
 toEntryLbl (IdLabel n c ConInfoTable)    = IdLabel n c ConEntry
-toEntryLbl (IdLabel n _ BlockInfoTable)  = mkAsmTempLabel (nameUnique n)
+toEntryLbl (IdLabel n _ BlockInfoTable)  = mkLocalBlockLabel (nameUnique n)
                               -- See Note [Proc-point local block entry-point].
 toEntryLbl (IdLabel n c _)               = IdLabel n c Entry
 toEntryLbl (CmmLabel m str CmmInfo)      = CmmLabel m str CmmEntry
@@ -710,6 +748,7 @@ needsCDecl (SRTLabel _)                 = True
 needsCDecl (LargeSRTLabel _)            = False
 needsCDecl (LargeBitmapLabel _)         = False
 needsCDecl (IdLabel _ _ _)              = True
+needsCDecl (LocalBlockLabel _)          = True
 
 needsCDecl (StringLitLabel _)           = False
 needsCDecl (AsmTempLabel _)             = False
@@ -732,11 +771,11 @@ needsCDecl (DynamicLinkerLabel {})      = panic "needsCDecl DynamicLinkerLabel"
 needsCDecl PicBaseLabel                 = panic "needsCDecl PicBaseLabel"
 needsCDecl (DeadStripPreventer {})      = panic "needsCDecl DeadStripPreventer"
 
--- | If a label is a local temporary used for native code generation
---      then return just its unique, otherwise nothing.
-maybeAsmTemp :: CLabel -> Maybe Unique
-maybeAsmTemp (AsmTempLabel uq)          = Just uq
-maybeAsmTemp _                          = Nothing
+-- | If a label is a local block label then return just its 'BlockId', otherwise
+-- 'Nothing'.
+maybeLocalBlockLabel :: CLabel -> Maybe BlockId
+maybeLocalBlockLabel (LocalBlockLabel uq)  = Just $ mkBlockId uq
+maybeLocalBlockLabel _                     = Nothing
 
 
 -- | Check whether a label corresponds to a C function that has
@@ -843,6 +882,7 @@ externallyVisibleCLabel (StringLitLabel _)      = False
 externallyVisibleCLabel (AsmTempLabel _)        = False
 externallyVisibleCLabel (AsmTempDerivedLabel _ _)= False
 externallyVisibleCLabel (RtsLabel _)            = True
+externallyVisibleCLabel (LocalBlockLabel _)     = False
 externallyVisibleCLabel (CmmLabel _ _ _)        = True
 externallyVisibleCLabel (ForeignLabel{})        = True
 externallyVisibleCLabel (IdLabel name _ info)   = isExternalName name && externallyVisibleIdLabel info
@@ -887,6 +927,7 @@ isGcPtrLabel lbl = case labelType lbl of
 -- | Work out the general type of data at the address of this label
 --    whether it be code, data, or static GC object.
 labelType :: CLabel -> CLabelType
+labelType (IdLabel _ _ info)                    = idInfoLabelType info
 labelType (CmmLabel _ _ CmmData)                = DataLabel
 labelType (CmmLabel _ _ CmmClosure)             = GcPtrLabel
 labelType (CmmLabel _ _ CmmCode)                = CodeLabel
@@ -898,18 +939,29 @@ labelType (CmmLabel _ _ CmmRet)                 = CodeLabel
 labelType (RtsLabel (RtsSelectorInfoTable _ _)) = DataLabel
 labelType (RtsLabel (RtsApInfoTable _ _))       = DataLabel
 labelType (RtsLabel (RtsApFast _))              = CodeLabel
+labelType (RtsLabel _)                          = DataLabel
+labelType (LocalBlockLabel _)                   = CodeLabel
 labelType (SRTLabel _)                          = DataLabel
+labelType (ForeignLabel _ _ _ IsFunction)       = CodeLabel
+labelType (ForeignLabel _ _ _ IsData)           = DataLabel
+labelType (AsmTempLabel _)                      = panic "labelType(AsmTempLabel)"
+labelType (AsmTempDerivedLabel _ _)             = panic "labelType(AsmTempDerivedLabel)"
+labelType (StringLitLabel _)                    = DataLabel
+labelType (CC_Label _)                          = DataLabel
+labelType (CCS_Label _)                         = DataLabel
+labelType (DynamicLinkerLabel _ _)              = DataLabel -- Is this right?
+labelType PicBaseLabel                          = DataLabel
+labelType (DeadStripPreventer _)                = DataLabel
+labelType (HpcTicksLabel _)                     = DataLabel
 labelType (LargeSRTLabel _)                     = DataLabel
 labelType (LargeBitmapLabel _)                  = DataLabel
-labelType (ForeignLabel _ _ _ IsFunction)       = CodeLabel
-labelType (IdLabel _ _ info)                    = idInfoLabelType info
-labelType _                                     = DataLabel
 
 idInfoLabelType :: IdLabelInfo -> CLabelType
 idInfoLabelType info =
   case info of
     InfoTable     -> DataLabel
     LocalInfoTable -> DataLabel
+    BlockInfoTable -> DataLabel
     Closure       -> GcPtrLabel
     ConInfoTable  -> DataLabel
     ClosureTable  -> DataLabel
@@ -941,6 +993,8 @@ labelDynamic dflags this_mod lbl =
        (WayDyn `elem` ways dflags) && (this_pkg /= pkg)
     | otherwise ->
        True
+
+   LocalBlockLabel _    -> False
 
    ForeignLabel _ _ source _  ->
        if os == OSMinGW32
@@ -1058,6 +1112,13 @@ instance Outputable CLabel where
 
 pprCLabel :: Platform -> CLabel -> SDoc
 
+pprCLabel platform (LocalBlockLabel u)
+  =  getPprStyle $ \ sty ->
+     if asmStyle sty then
+        ptext (asmTempLabelPrefix platform) <> pprUniqueAlways u
+     else
+        char '_' <> pprUniqueAlways u
+
 pprCLabel platform (AsmTempLabel u)
  | not (platformUnregisterised platform)
   =  getPprStyle $ \ sty ->
@@ -1069,8 +1130,9 @@ pprCLabel platform (AsmTempLabel u)
 pprCLabel platform (AsmTempDerivedLabel l suf)
  | cGhcWithNativeCodeGen == "YES"
    = ptext (asmTempLabelPrefix platform)
-     <> case l of AsmTempLabel u -> pprUniqueAlways u
-                  _other         -> pprCLabel platform l
+     <> case l of AsmTempLabel u    -> pprUniqueAlways u
+                  LocalBlockLabel u -> pprUniqueAlways u
+                  _other            -> pprCLabel platform l
      <> ftext suf
 
 pprCLabel platform (DynamicLinkerLabel info lbl)
@@ -1126,6 +1188,8 @@ pprCLbl (LargeBitmapLabel u)  = text "b" <> pprUniqueAlways u <> pp_cSEP <> text
 pprCLbl (CmmLabel _ str CmmCode)        = ftext str
 pprCLbl (CmmLabel _ str CmmData)        = ftext str
 pprCLbl (CmmLabel _ str CmmPrimCall)    = ftext str
+
+pprCLbl (LocalBlockLabel u)             = text "blk_" <> pprUniqueAlways u
 
 pprCLbl (RtsLabel (RtsApFast str))   = ftext str <> text "_fast"
 
@@ -1246,53 +1310,63 @@ asmTempLabelPrefix platform = case platformOS platform of
     _        -> sLit ".L"
 
 pprDynamicLinkerAsmLabel :: Platform -> DynamicLinkerLabelInfo -> CLabel -> SDoc
-pprDynamicLinkerAsmLabel platform dllInfo lbl
- = if platformOS platform == OSDarwin
-   then if platformArch platform == ArchX86_64
-        then case dllInfo of
-             CodeStub        -> char 'L' <> ppr lbl <> text "$stub"
-             SymbolPtr       -> char 'L' <> ppr lbl <> text "$non_lazy_ptr"
-             GotSymbolPtr    -> ppr lbl <> text "@GOTPCREL"
-             GotSymbolOffset -> ppr lbl
-        else case dllInfo of
-             CodeStub  -> char 'L' <> ppr lbl <> text "$stub"
-             SymbolPtr -> char 'L' <> ppr lbl <> text "$non_lazy_ptr"
-             _         -> panic "pprDynamicLinkerAsmLabel"
+pprDynamicLinkerAsmLabel platform dllInfo lbl =
+    case platformOS platform of
+      OSDarwin
+        | platformArch platform == ArchX86_64 ->
+          case dllInfo of
+            CodeStub        -> char 'L' <> ppr lbl <> text "$stub"
+            SymbolPtr       -> char 'L' <> ppr lbl <> text "$non_lazy_ptr"
+            GotSymbolPtr    -> ppr lbl <> text "@GOTPCREL"
+            GotSymbolOffset -> ppr lbl
+        | otherwise ->
+          case dllInfo of
+            CodeStub  -> char 'L' <> ppr lbl <> text "$stub"
+            SymbolPtr -> char 'L' <> ppr lbl <> text "$non_lazy_ptr"
+            _         -> panic "pprDynamicLinkerAsmLabel"
 
-   else if platformOS platform == OSAIX
-        then case dllInfo of
-             SymbolPtr -> text "LC.." <> ppr lbl -- GCC's naming convention
-             _         -> panic "pprDynamicLinkerAsmLabel"
+      OSAIX ->
+          case dllInfo of
+            SymbolPtr -> text "LC.." <> ppr lbl -- GCC's naming convention
+            _         -> panic "pprDynamicLinkerAsmLabel"
 
-   else if osElfTarget (platformOS platform)
-        then if platformArch platform == ArchPPC
-             then case dllInfo of
-                       CodeStub  -> -- See Note [.LCTOC1 in PPC PIC code]
-                                    ppr lbl <> text "+32768@plt"
-                       SymbolPtr -> text ".LC_" <> ppr lbl
-                       _         -> panic "pprDynamicLinkerAsmLabel"
-             else if platformArch platform == ArchX86_64
-                  then case dllInfo of
-                       CodeStub        -> ppr lbl <> text "@plt"
-                       GotSymbolPtr    -> ppr lbl <> text "@gotpcrel"
-                       GotSymbolOffset -> ppr lbl
-                       SymbolPtr       -> text ".LC_" <> ppr lbl
-             else if platformArch platform == ArchPPC_64 ELF_V1
-                  || platformArch platform == ArchPPC_64 ELF_V2
-                  then case dllInfo of
-                       GotSymbolPtr    -> text ".LC_"  <> ppr lbl
-                                               <> text "@toc"
-                       GotSymbolOffset -> ppr lbl
-                       SymbolPtr       -> text ".LC_" <> ppr lbl
-                       _               -> panic "pprDynamicLinkerAsmLabel"
-        else case dllInfo of
-             CodeStub        -> ppr lbl <> text "@plt"
-             SymbolPtr       -> text ".LC_" <> ppr lbl
-             GotSymbolPtr    -> ppr lbl <> text "@got"
-             GotSymbolOffset -> ppr lbl <> text "@gotoff"
-   else if platformOS platform == OSMinGW32
-        then case dllInfo of
-             SymbolPtr -> text "__imp_" <> ppr lbl
-             _         -> panic "pprDynamicLinkerAsmLabel"
-   else panic "pprDynamicLinkerAsmLabel"
+      _ | osElfTarget (platformOS platform) -> elfLabel
+
+      OSMinGW32 ->
+          case dllInfo of
+            SymbolPtr -> text "__imp_" <> ppr lbl
+            _         -> panic "pprDynamicLinkerAsmLabel"
+
+      _ -> panic "pprDynamicLinkerAsmLabel"
+  where
+    elfLabel
+      | platformArch platform == ArchPPC
+      = case dllInfo of
+          CodeStub  -> -- See Note [.LCTOC1 in PPC PIC code]
+                       ppr lbl <> text "+32768@plt"
+          SymbolPtr -> text ".LC_" <> ppr lbl
+          _         -> panic "pprDynamicLinkerAsmLabel"
+
+      | platformArch platform == ArchX86_64
+      = case dllInfo of
+          CodeStub        -> ppr lbl <> text "@plt"
+          GotSymbolPtr    -> ppr lbl <> text "@gotpcrel"
+          GotSymbolOffset -> ppr lbl
+          SymbolPtr       -> text ".LC_" <> ppr lbl
+
+      | platformArch platform == ArchPPC_64 ELF_V1
+        || platformArch platform == ArchPPC_64 ELF_V2
+      = case dllInfo of
+          GotSymbolPtr    -> text ".LC_"  <> ppr lbl
+                                  <> text "@toc"
+          GotSymbolOffset -> ppr lbl
+          SymbolPtr       -> text ".LC_" <> ppr lbl
+          _               -> panic "pprDynamicLinkerAsmLabel"
+
+      | otherwise
+      = case dllInfo of
+          CodeStub        -> ppr lbl <> text "@plt"
+          SymbolPtr       -> text ".LC_" <> ppr lbl
+          GotSymbolPtr    -> ppr lbl <> text "@got"
+          GotSymbolOffset -> ppr lbl <> text "@gotoff"
 
