@@ -416,6 +416,10 @@ $(eval $(call foreachLibrary,addLibraryForCleaning))
 
 else # CLEANING
 
+ifeq "$(DisableFFI)" "YES"
+libraries/ghci_CONFIGURE_OPTS += -fdisableffi
+endif
+
 # Packages that are built by stage0. These packages are dependencies of
 # programs such as GHC and ghc-pkg, that we do not assume the stage0
 # compiler already has installed (or up-to-date enough).
@@ -634,7 +638,9 @@ BUILD_DIRS += driver
 BUILD_DIRS += driver/ghci
 BUILD_DIRS += driver/ghc
 BUILD_DIRS += driver/haddock
+ifneq "$(DisableFFI)" "YES"
 BUILD_DIRS += libffi
+endif
 BUILD_DIRS += utils/deriveConstants
 BUILD_DIRS += includes
 BUILD_DIRS += rts
