@@ -38,7 +38,9 @@
 #endif
 #endif
 
+#if !defined(DISABLE_FFI)
 #include "ffi.h"
+#endif
 
 /* --------------------------------------------------------------------------
  * The bytecode interpreter
@@ -1714,6 +1716,9 @@ run_BCO:
         }
 
         case bci_CCALL: {
+#if defined(DISABLE_FFI)
+            barf("interpretBCO: FFI has been disabled");
+#else
             void *tok;
             int stk_offset            = BCO_NEXT;
             int o_itbl                = BCO_GET_LARGE_ARG;
@@ -1848,6 +1853,7 @@ run_BCO:
             memcpy(Sp, ret, sizeof(W_) * stg_min(stk_offset,ret_size));
 
             goto nextInsn;
+#endif
         }
 
         case bci_JMP: {
