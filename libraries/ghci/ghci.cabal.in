@@ -22,6 +22,11 @@ Flag ghci
     Default: False
     Manual: True
 
+Flag disableffi
+    Description: Disable libffi support.
+    Default: False
+    Manual: True
+
 source-repository head
     type:     git
     location: http://git.haskell.org/ghc.git
@@ -54,6 +59,9 @@ library
             GHCi.ObjLink
             GHCi.Signals
             GHCi.TH
+
+    if flag(disableffi)
+        CPP-Options: -DDISABLE_FFI
 
     exposed-modules:
         GHCi.BreakArray

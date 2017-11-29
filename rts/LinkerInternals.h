@@ -339,6 +339,9 @@ struct ObjectCodeFormatInfo { void* placeholder; };
 #elif defined(darwin_HOST_OS) || defined(ios_HOST_OS)
 #  define OBJFORMAT_MACHO
 #  include "linker/MachOTypes.h"
+#elif defined(unknown_wasm_HOST_OS)
+struct SectionFormatInfo { void* placeholder; };
+struct ObjectCodeFormatInfo { void* placeholder; };
 #else
 #error "Unknown OBJECT_FORMAT for HOST_OS"
 #endif
