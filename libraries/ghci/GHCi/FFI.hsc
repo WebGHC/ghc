@@ -6,7 +6,9 @@
 --
 -----------------------------------------------------------------------------
 
+#ifndef DISABLE_FFI
 #include <ffi.h>
+#endif // DISABLE_FFI
 
 {-# LANGUAGE CPP, DeriveGeneric, DeriveAnyClass #-}
 module GHCi.FFI
@@ -43,6 +45,7 @@ data FFIConv
   | FFIStdCall
   deriving (Show, Generic, Binary)
 
+#ifndef DISABLE_FFI
 
 prepForeignCall
     :: FFIConv
@@ -148,3 +151,23 @@ foreign import ccall "ffi_prep_cif"
 --            -> Ptr ()                    -- put result here
 --            -> Ptr (Ptr ())              -- arg values
 --            -> IO ()
+
+#else // DISABLE_FFI
+
+type C_ffi_cif = ()
+
+prepForeignCall
+    :: FFIConv
+    -> [FFIType]          -- arg types
+    -> FFIType            -- result type
+    -> IO (Ptr C_ffi_cif) -- token for making calls (must be freed by caller)
+prepForeignCall _ _ _ =
+  error "Cannot do FFI - no FFI solution for WebAssembly"
+
+freeForeignCallInfo
+    :: Ptr C_ffi_cif
+    -> IO ()
+freeForeignCallInfo _ =
+  error "Cannot do FFI - no FFI solution for WebAssembly"
+
+#endif // DISABLE_FFI

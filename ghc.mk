@@ -420,6 +420,10 @@ else # CLEANING
 # programs such as GHC and ghc-pkg, that we do not assume the stage0
 # compiler already has installed (or up-to-date enough).
 
+ifeq "$(DisableFFI)" "YES"
+libraries/ghci_CONFIGURE_OPTS += -fdisableffi
+endif
+
 PACKAGES_STAGE0 = binary text transformers mtl parsec Cabal/Cabal hpc ghc-boot-th ghc-boot template-haskell ghci
 ifeq "$(Windows_Host)" "NO"
 PACKAGES_STAGE0 += terminfo
@@ -638,7 +642,9 @@ BUILD_DIRS += driver
 BUILD_DIRS += driver/ghci
 BUILD_DIRS += driver/ghc
 BUILD_DIRS += driver/haddock
+ifneq "$(DisableFFI)" "YES"
 BUILD_DIRS += libffi
+endif
 BUILD_DIRS += utils/deriveConstants
 BUILD_DIRS += includes
 BUILD_DIRS += rts

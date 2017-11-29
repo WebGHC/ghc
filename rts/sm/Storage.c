@@ -35,7 +35,9 @@
 
 #include <string.h>
 
+#if !defined(DISABLE_FFI)
 #include "ffi.h"
+#endif
 
 /*
  * All these globals require sm_mutex to access in THREADED_RTS mode.
@@ -1383,7 +1385,7 @@ extern void __clear_cache(char * begin, char * end);
    writing code into memory, so the processor reliably sees it. */
 void flushExec (W_ len, AdjustorExecutable exec_addr)
 {
-#if defined(i386_HOST_ARCH) || defined(x86_64_HOST_ARCH)
+#if defined(i386_HOST_ARCH) || defined(x86_64_HOST_ARCH) || defined (wasm32_HOST_ARCH)
   /* x86 doesn't need to do anything, so just suppress some warnings. */
   (void)len;
   (void)exec_addr;
