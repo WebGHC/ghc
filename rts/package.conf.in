@@ -92,6 +92,7 @@ hugs-options:
 cc-options:
 
 ld-options:
+#if !defined(unknown_wasm_HOST_OS)
 #if defined(LEADING_UNDERSCORE)
 
            "-Wl,-u,_base_GHCziTopHandler_runIO_closure"
@@ -287,6 +288,9 @@ ld-options:
 #if WORD_SIZE_IN_BITS == 64
          , "-Wl,-u,hs_atomicwrite64"
 #endif
+#endif
+#else
+        "-Wl,-allow-undefined-file,rts.wasm.syms"
 #endif
 
 /*  Pick up static libraries in preference over dynamic if in earlier search
