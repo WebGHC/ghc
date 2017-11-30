@@ -215,7 +215,6 @@ rts_dist_FFI_SO =
 endif
 
 # Making a shared library for the RTS.
-ifneq "$(DisableFFI)" "YES"
 ifneq "$$(findstring dyn, $1)" ""
 ifeq "$$(TargetOS_CPP)" "mingw32"
 $$(rts_$1_LIB) : $$(rts_$1_OBJS) $$(ALL_RTS_DEF_LIBS) rts/dist/libs.depend rts/dist/build/$$(LIBFFI_DLL)
@@ -240,6 +239,7 @@ $$(rts_$1_LIB) : $$(rts_$1_OBJS) $$(ALL_RTS_DEF_LIBS) rts/dist/libs.depend rts/d
          "$(rts_INSTALL_INFO)-$(subst dyn,,$(subst _dyn,,$(subst v,,$1)))" "$(ProjectVersion)"
 
 else
+ifneq "$$(DisableFFI)" "YES"
 ifneq "$$(UseSystemLibFFI)" "YES"
 LIBFFI_LIBS = -Lrts/dist/build -l$$(LIBFFI_NAME)
 ifeq "$$(TargetElf)" "YES"
@@ -248,20 +248,21 @@ endif
 ifeq "$(TargetOS_CPP)" "darwin"
 LIBFFI_LIBS += -optl-Wl,-rpath -optl-Wl,@loader_path
 endif
-
 else
 # flags will be taken care of in rts/dist/libs.depend
 LIBFFI_LIBS =
 endif
+else
+# flags will be taken care of in rts/dist/libs.depend
+LIBFFI_LIBS =
+endif
+
 $$(rts_$1_LIB) : $$(rts_$1_OBJS) $$(rts_$1_DTRACE_OBJS) rts/dist/libs.depend $$(rts_dist_FFI_SO)
 	"$$(RM)" $$(RM_OPTS) $$@
 	"$$(rts_dist_HC)" -this-unit-id rts -shared -dynamic -dynload deploy \
 	  -no-auto-link-packages $$(LIBFFI_LIBS) `cat rts/dist/libs.depend` $$(rts_$1_OBJS) \
           $$(rts_dist_$1_GHC_LD_OPTS) \
 	  $$(rts_$1_DTRACE_OBJS) -o $$@
-endif
-else
-LIBFFI_LIBS =
 endif
 
 else
