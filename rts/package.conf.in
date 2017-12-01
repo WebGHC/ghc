@@ -32,6 +32,9 @@ library-dirs:           LIB_DIR"/rts"
 #else /* !INSTALLING */
 library-dirs:           TOP"/rts/dist/build"
 #endif
+
+hs-libraries:   "HSrts"
+
 #endif
 
 extra-libraries:
