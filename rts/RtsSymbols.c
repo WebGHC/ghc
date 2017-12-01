@@ -985,7 +985,9 @@ RTS_MINGW_ONLY_SYMBOLS
 RTS_DARWIN_ONLY_SYMBOLS
 RTS_OPENBSD_ONLY_SYMBOLS
 RTS_LIBGCC_SYMBOLS
+#if !defined(DISABLE_FFI)
 RTS_LIBFFI_SYMBOLS
+#endif
 #undef SymI_NeedsProto
 #undef SymI_NeedsDataProto
 #undef SymI_HasProto
@@ -1035,7 +1037,9 @@ RtsSymbolVal rtsSyms[] = {
       RTS_DARWIN_ONLY_SYMBOLS
       RTS_OPENBSD_ONLY_SYMBOLS
       RTS_LIBGCC_SYMBOLS
+#if !defined(DISABLE_FFI)
       RTS_LIBFFI_SYMBOLS
+#endif
 #if defined(darwin_HOST_OS) && defined(i386_HOST_ARCH)
       // dyld stub code contains references to this,
       // but it should never be called because we treat
