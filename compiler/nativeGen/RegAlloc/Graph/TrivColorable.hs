@@ -120,6 +120,7 @@ trivColorable platform virtualRegSqueeze realRegSqueeze RcInteger conflicts excl
                             ArchMipseb    -> panic "trivColorable ArchMipseb"
                             ArchMipsel    -> panic "trivColorable ArchMipsel"
                             ArchJavaScript-> panic "trivColorable ArchJavaScript"
+                            ArchWasm      -> panic "trivColorable ArchWasm"
                             ArchUnknown   -> panic "trivColorable ArchUnknown")
         , count2        <- accSqueeze 0 cALLOCATABLE_REGS_INTEGER
                                 (virtualRegSqueeze RcInteger)
@@ -146,6 +147,7 @@ trivColorable platform virtualRegSqueeze realRegSqueeze RcFloat conflicts exclus
                             ArchMipseb    -> panic "trivColorable ArchMipseb"
                             ArchMipsel    -> panic "trivColorable ArchMipsel"
                             ArchJavaScript-> panic "trivColorable ArchJavaScript"
+                            ArchWasm      -> panic "trivColorable ArchWasm"
                             ArchUnknown   -> panic "trivColorable ArchUnknown")
         , count2        <- accSqueeze 0 cALLOCATABLE_REGS_FLOAT
                                 (virtualRegSqueeze RcFloat)
@@ -172,6 +174,7 @@ trivColorable platform virtualRegSqueeze realRegSqueeze RcDouble conflicts exclu
                             ArchMipseb    -> panic "trivColorable ArchMipseb"
                             ArchMipsel    -> panic "trivColorable ArchMipsel"
                             ArchJavaScript-> panic "trivColorable ArchJavaScript"
+                            ArchWasm      -> panic "trivColorable ArchWasm"
                             ArchUnknown   -> panic "trivColorable ArchUnknown")
         , count2        <- accSqueeze 0 cALLOCATABLE_REGS_DOUBLE
                                 (virtualRegSqueeze RcDouble)
@@ -198,6 +201,7 @@ trivColorable platform virtualRegSqueeze realRegSqueeze RcDoubleSSE conflicts ex
                             ArchMipseb    -> panic "trivColorable ArchMipseb"
                             ArchMipsel    -> panic "trivColorable ArchMipsel"
                             ArchJavaScript-> panic "trivColorable ArchJavaScript"
+                            ArchWasm      -> panic "trivColorable ArchWasm"
                             ArchUnknown   -> panic "trivColorable ArchUnknown")
         , count2        <- accSqueeze 0 cALLOCATABLE_REGS_SSE
                                 (virtualRegSqueeze RcDoubleSSE)

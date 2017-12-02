@@ -4076,7 +4076,7 @@ defaultFlags settings
 
     ++ concatMap (wayGeneralFlags platform) (defaultWays settings)
 
-    ++ (if platformArch platform == ArchUnknown
+    ++ (if platformArch platform == ArchWasm
           then [Opt_FastLlvm]
           else [ ])
 
