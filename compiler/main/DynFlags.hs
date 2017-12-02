@@ -4482,6 +4482,10 @@ defaultFlags settings
     ++ concatMap (wayGeneralFlags platform) (defaultWays settings)
     ++ validHoleFitDefaults
 
+    ++ (if platformArch platform == ArchWasm
+          then [Opt_FastLlvm]
+          else [ ])
+
     where platform = sTargetPlatform settings
 
 -- | These are the default settings for the display and sorting of valid hole
