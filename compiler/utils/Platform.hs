@@ -64,6 +64,7 @@ data Arch
         | ArchMipseb
         | ArchMipsel
         | ArchJavaScript
+        | ArchWasm
         deriving (Read, Show, Eq)
 
 isARM :: Arch -> Bool
@@ -88,6 +89,7 @@ data OS
         | OSQNXNTO
         | OSAIX
         | OSHurd
+        | OSWasm
         deriving (Read, Show, Eq)
 
 -- | ARM Instruction Set Architecture, Extensions and ABI
@@ -138,6 +140,7 @@ osElfTarget OSHaiku     = True
 osElfTarget OSQNXNTO    = False
 osElfTarget OSAIX       = False
 osElfTarget OSHurd      = True
+osElfTarget OSWasm      = False
 osElfTarget OSUnknown   = False
  -- Defaulting to False is safe; it means don't rely on any
  -- ELF-specific functionality.  It is important to have a default for
@@ -159,4 +162,3 @@ platformUsesFrameworks = osUsesFrameworks . platformOS
 osSubsectionsViaSymbols :: OS -> Bool
 osSubsectionsViaSymbols OSDarwin = True
 osSubsectionsViaSymbols _        = False
-
