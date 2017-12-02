@@ -53,6 +53,7 @@ targetVirtualRegSqueeze platform
       ArchMipseb    -> panic "targetVirtualRegSqueeze ArchMipseb"
       ArchMipsel    -> panic "targetVirtualRegSqueeze ArchMipsel"
       ArchJavaScript-> panic "targetVirtualRegSqueeze ArchJavaScript"
+      ArchWasm      -> panic "targetVirtualRegSqueeze ArchWasm"
       ArchUnknown   -> panic "targetVirtualRegSqueeze ArchUnknown"
 
 
@@ -71,6 +72,7 @@ targetRealRegSqueeze platform
       ArchMipseb    -> panic "targetRealRegSqueeze ArchMipseb"
       ArchMipsel    -> panic "targetRealRegSqueeze ArchMipsel"
       ArchJavaScript-> panic "targetRealRegSqueeze ArchJavaScript"
+      ArchWasm      -> panic "targetRealRegSqueeze ArchWasm"
       ArchUnknown   -> panic "targetRealRegSqueeze ArchUnknown"
 
 targetClassOfRealReg :: Platform -> RealReg -> RegClass
@@ -88,6 +90,7 @@ targetClassOfRealReg platform
       ArchMipseb    -> panic "targetClassOfRealReg ArchMipseb"
       ArchMipsel    -> panic "targetClassOfRealReg ArchMipsel"
       ArchJavaScript-> panic "targetClassOfRealReg ArchJavaScript"
+      ArchWasm      -> panic "targetClassOfRealReg ArchWasm"
       ArchUnknown   -> panic "targetClassOfRealReg ArchUnknown"
 
 targetMkVirtualReg :: Platform -> Unique -> Format -> VirtualReg
@@ -105,6 +108,7 @@ targetMkVirtualReg platform
       ArchMipseb    -> panic "targetMkVirtualReg ArchMipseb"
       ArchMipsel    -> panic "targetMkVirtualReg ArchMipsel"
       ArchJavaScript-> panic "targetMkVirtualReg ArchJavaScript"
+      ArchWasm      -> panic "targetMkVirtualReg ArchWasm"
       ArchUnknown   -> panic "targetMkVirtualReg ArchUnknown"
 
 targetRegDotColor :: Platform -> RealReg -> SDoc
@@ -122,6 +126,7 @@ targetRegDotColor platform
       ArchMipseb    -> panic "targetRegDotColor ArchMipseb"
       ArchMipsel    -> panic "targetRegDotColor ArchMipsel"
       ArchJavaScript-> panic "targetRegDotColor ArchJavaScript"
+      ArchWasm      -> panic "targetRegDotColor ArchWasm"
       ArchUnknown   -> panic "targetRegDotColor ArchUnknown"
 
 

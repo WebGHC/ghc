@@ -221,6 +221,7 @@ linearRegAlloc dflags entry_ids block_live sccs
       ArchMipseb     -> panic "linearRegAlloc ArchMipseb"
       ArchMipsel     -> panic "linearRegAlloc ArchMipsel"
       ArchJavaScript -> panic "linearRegAlloc ArchJavaScript"
+      ArchWasm       -> panic "linearRegAlloc ArchWasm"
       ArchUnknown    -> panic "linearRegAlloc ArchUnknown"
  where
   go f = linearRegAlloc' dflags f entry_ids block_live sccs
