@@ -72,24 +72,25 @@ cgForeignCall (CCall (CCallSpec target cconv safety)) stg_args res_ty
                                      (wORD_SIZE dflags)
         ; cmm_args <- getFCallArgs stg_args
         ; (res_regs, res_hints) <- newUnboxedTupleRegs res_ty
-        ; let ((call_args, arg_hints), cmm_target)
-                = case target of
+        ; ((call_args, arg_hints), cmm_target) <- case target of
                    StaticTarget _ _   _      False ->
                        panic "cgForeignCall: unexpected FFI value import"
                    StaticTarget _ lbl mPkgId True
-                     -> let labelSource
+                     -> do
+                        let labelSource
                                 = case mPkgId of
                                         Nothing         -> ForeignLabelInThisPackage
                                         Just pkgId      -> ForeignLabelInPackage pkgId
                             size = call_size cmm_args
-                        in  ( unzip cmm_args
-                            , CmmLit (CmmLabel
-                                        (mkForeignLabel lbl size labelSource IsFunction)))
+                        emit $ mkMiddle $ CmmExternDecl cconv lbl (zip res_regs res_hints) $ fmap (\(e,hint) -> (cmmExprType dflags e, hint)) cmm_args
+                        return ( unzip cmm_args
+                               , CmmLit (CmmLabel
+                                           (mkForeignLabel lbl size labelSource IsFunction)))
 
-                   DynamicTarget    ->  case cmm_args of
+                   DynamicTarget    ->  return $ case cmm_args of
                                            (fn,_):rest -> (unzip rest, fn)
                                            [] -> panic "cgForeignCall []"
-              fc = ForeignConvention cconv arg_hints res_hints CmmMayReturn
+        ; let fc = ForeignConvention cconv arg_hints res_hints CmmMayReturn
               call_target = ForeignTarget cmm_target fc
 
         -- we want to emit code for the call, and then emitReturn.
