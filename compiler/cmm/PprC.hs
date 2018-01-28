@@ -140,7 +140,7 @@ pprTop (CmmData section (Statics lbl lits)) =
 --
 
 pprBBlock :: CmmBlock -> SDoc
-pprBBlock block =
+pprBBlock block = braces $
   nest 4 (pprBlockId (entryLabel block) <> colon) $$
   nest 8 (vcat (map pprStmt (blockToList nodes)) $$ pprStmt last)
  where
@@ -236,7 +236,7 @@ pprStmt stmt =
 
         ForeignConvention cconv _ _ ret = conv
 
-        cast_fn = parens (cCast (pprCFunType (char '*') cconv hresults hargs) fn)
+        cast_fn = parens (cCast (pprCFunType (char '*') cconv hresults (foo dflags hargs)) fn)
 
         -- See wiki:Commentary/Compiler/Backends/PprC#Prototypes
         fnCall =
@@ -250,7 +250,9 @@ pprStmt stmt =
                         -- can't add the @n suffix ourselves, because
                         -- it isn't valid C.
                 | CmmNeverReturns <- ret ->
-                    pprCall cast_fn cconv hresults hargs <> semi
+                    braces $
+                      (text "extern" <+> pprCFunType (ppr lbl) cconv hresults (foo dflags hargs) <+> text "__attribute__ ((noreturn))" <> semi) $$
+                      pprCall cast_fn cconv hresults hargs <> semi
                 | not (isMathFun lbl) ->
                     pprForeignCall (ppr lbl) cconv hresults hargs
               _ ->
@@ -276,8 +278,7 @@ pprStmt stmt =
           -- We also need to cast mem primops to prevent conflicts with GCC
           -- builtins (see bug #5967).
           | Just _align <- machOpMemcpyishAlign op
-          = (text ";EFF_(" <> fn <> char ')' <> semi) $$
-            pprForeignCall fn cconv hresults hargs
+          = semi <> pprForeignCall fn cconv hresults hargs
           | otherwise
           = pprCall fn cconv hresults hargs
 
@@ -286,6 +287,7 @@ pprStmt stmt =
     CmmCall { cml_target = expr } -> mkJMP_ (pprExpr expr) <> semi
     CmmSwitch arg ids        -> sdocWithDynFlags $ \dflags ->
                                 pprSwitch dflags arg ids
+    CmmExternDecl cconv lbl res args -> text "extern" <+> pprCFunType (pprCLabelString lbl) cconv res args <+> semi
 
     _other -> pprPanic "PprC.pprStmt" (ppr stmt)
 
@@ -293,23 +295,28 @@ type Hinted a = (a, ForeignHint)
 
 pprForeignCall :: SDoc -> CCallConv -> [Hinted CmmFormal] -> [Hinted CmmActual]
                -> SDoc
-pprForeignCall fn cconv results args = fn_call
-  where
+pprForeignCall fn cconv results args = sdocWithDynFlags $ \dflags ->
+  let
     fn_call = braces (
-                 pprCFunType (char '*' <> text "ghcFunPtr") cconv results args <> semi
+                 (text "extern" <+> pprCFunType fn cconv results arg_tys <> semi)
+              $$ pprCFunType (char '*' <> text "ghcFunPtr") cconv results arg_tys <> semi
               $$ text "ghcFunPtr" <+> equals <+> cast_fn <> semi
               $$ pprCall (text "ghcFunPtr") cconv results args <> semi
              )
-    cast_fn = parens (parens (pprCFunType (char '*') cconv results args) <> fn)
+    cast_fn = parens (parens (pprCFunType (char '*') cconv results arg_tys) <> fn)
+    arg_tys = foo dflags args
+  in fn_call
 
-pprCFunType :: SDoc -> CCallConv -> [Hinted CmmFormal] -> [Hinted CmmActual] -> SDoc
+foo :: DynFlags -> [Hinted CmmActual] -> [Hinted CmmType]
+foo dflags = map (\(expr, hint) -> (cmmExprType dflags expr, hint))
+
+pprCFunType :: SDoc -> CCallConv -> [Hinted CmmFormal] -> [Hinted CmmType] -> SDoc
 pprCFunType ppr_fn cconv ress args
-  = sdocWithDynFlags $ \dflags ->
-    let res_type [] = text "void"
+  = let res_type [] = text "void"
         res_type [(one, hint)] = machRepHintCType (localRegType one) hint
         res_type _ = panic "pprCFunType: only void or 1 return value supported"
 
-        arg_type (expr, hint) = machRepHintCType (cmmExprType dflags expr) hint
+        arg_type (ty, hint) = machRepHintCType ty hint
     in res_type ress <+>
        parens (ccallConvAttribute cconv <> ppr_fn) <>
        parens (commafy (map arg_type args))

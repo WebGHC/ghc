@@ -50,6 +50,7 @@ import Data.Int
 
 data CmmType    -- The important one!
   = CmmType CmmCat Width
+  deriving ( Eq )
 
 data CmmCat                -- "Category" (not exported)
    = GcPtrCat              -- GC pointer

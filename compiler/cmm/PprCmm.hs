@@ -48,6 +48,7 @@ import CmmUtils
 import CmmSwitch
 import DynFlags
 import FastString
+import ForeignCall
 import Outputable
 import PprCmmDecl
 import PprCmmExpr
@@ -290,6 +291,8 @@ pprNode node = pp_node <+> pp_debug
                , text "ret_off:" <+> ppr u
                , semi ]
 
+      CmmExternDecl _cconv lbl ret args -> text "extern" <+> ppr ret <+> pprCLabelString lbl <+> ppr args <+> semi
+
     pp_debug :: SDoc
     pp_debug =
       if not debugIsOn then empty
@@ -306,6 +309,7 @@ pprNode node = pp_node <+> pp_debug
              CmmSwitch {}            -> text "  // CmmSwitch"
              CmmCall {}              -> text "  // CmmCall"
              CmmForeignCall {}       -> text "  // CmmForeignCall"
+             CmmExternDecl {}        -> text "  // CmmExternDecl"
 
     commafy :: [SDoc] -> SDoc
     commafy xs = hsep $ punctuate comma xs

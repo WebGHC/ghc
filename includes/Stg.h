@@ -260,7 +260,7 @@ typedef StgFunPtr       F_;
 #define FN_(f)           StgFunPtr f(void)
 #define EF_(f)           StgFunPtr f(void) /* External Cmm functions */
 /* foreign functions: */
-#define EFF_(f)   void f() /* See Note [External function prototypes] */
+#define EFF_(f)
 
 /* Note [External function prototypes]  See Trac #8965, #11395
    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
