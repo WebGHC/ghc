@@ -160,6 +160,8 @@ data CmmNode e x where
       intrbl:: Bool             -- whether or not the call is interruptible
   } -> CmmNode O C
 
+  CmmExternDecl :: CCallConv -> CLabelString -> [(CmmFormal, ForeignHint)] -> [(CmmType, ForeignHint)] -> CmmNode O O
+
 {- Note [Foreign calls]
 ~~~~~~~~~~~~~~~~~~~~~~~
 A CmmUnsafeForeignCall is used for *unsafe* foreign calls;
@@ -473,6 +475,7 @@ mapExp f   (CmmCondBranch e ti fi l)             = CmmCondBranch (f e) ti fi l
 mapExp f   (CmmSwitch e ids)                     = CmmSwitch (f e) ids
 mapExp f   n@CmmCall {cml_target=tgt}            = n{cml_target = f tgt}
 mapExp f   (CmmForeignCall tgt fs as succ ret_args updfr intrbl) = CmmForeignCall (mapForeignTarget f tgt) fs (map f as) succ ret_args updfr intrbl
+mapExp _ m@(CmmExternDecl{})                     = m
 
 mapExpDeep :: (CmmExpr -> CmmExpr) -> CmmNode e x -> CmmNode e x
 mapExpDeep f = mapExp $ wrapRecExp f
@@ -510,6 +513,7 @@ mapExpM f (CmmForeignCall tgt fs as succ ret_args updfr intrbl)
     = case mapForeignTargetM f tgt of
         Just tgt' -> Just (CmmForeignCall tgt' fs (mapListJ f as) succ ret_args updfr intrbl)
         Nothing   -> (\xs -> CmmForeignCall tgt fs xs succ ret_args updfr intrbl) `fmap` mapListM f as
+mapExpM _ (CmmExternDecl{})         = Nothing
 
 -- share as much as possible
 mapListM :: (a -> Maybe a) -> [a] -> Maybe [a]
@@ -557,6 +561,7 @@ foldExp f (CmmCondBranch e _ _ _) z               = f e z
 foldExp f (CmmSwitch e _) z                       = f e z
 foldExp f (CmmCall {cml_target=tgt}) z            = f tgt z
 foldExp f (CmmForeignCall {tgt=tgt, args=args}) z = foldr f (foldExpForeignTarget f tgt z) args
+foldExp _ (CmmExternDecl {}) z                    = z
 
 foldExpDeep :: (CmmExpr -> z -> z) -> CmmNode e x -> z -> z
 foldExpDeep f = foldExp (wrapRecExpf f)
