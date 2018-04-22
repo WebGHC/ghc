@@ -1,13 +1,14 @@
 {-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE NoImplicitPrelude, MagicHash, UnboxedTuples,
-             ScopedTypeVariables #-}
+             ScopedTypeVariables, CApiFFI #-}
+
 
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Foreign.Marshal.Alloc
 -- Copyright   :  (c) The FFI task force 2001
 -- License     :  BSD-style (see the file libraries/base/LICENSE)
--- 
+--
 -- Maintainer  :  ffi@haskell.org
 -- Stability   :  provisional
 -- Portability :  portable
@@ -18,7 +19,7 @@
 -- memory blocks are commonly used to pass compound data structures to
 -- foreign functions or to provide space in which compound result values
 -- are obtained from foreign functions.
--- 
+--
 -- If any of the allocation functions fails, an exception is thrown.
 -- In some cases, memory exhaustion may mean the process is terminated.
 -- If 'free' or 'reallocBytes' is applied to a memory area
@@ -29,7 +30,7 @@
 -- further access to the memory area referenced by a pointer passed to
 -- 'realloc', 'reallocBytes', or 'free' entails undefined
 -- behaviour.
--- 
+--
 -- All storage allocated by functions that allocate based on a /size in bytes/
 -- must be sufficiently aligned for any of the basic foreign types
 -- that fits into the newly allocated storage. All storage allocated by
@@ -192,7 +193,7 @@ realloc ptr = failWhenNULL "realloc" (_realloc ptr size)
 --
 reallocBytes          :: Ptr a -> Int -> IO (Ptr a)
 reallocBytes ptr 0     = do free ptr; return nullPtr
-reallocBytes ptr size  = 
+reallocBytes ptr size  =
   failWhenNULL "realloc" (_realloc ptr (fromIntegral size))
 
 -- |Free a block of memory that was allocated with 'malloc',
@@ -214,7 +215,7 @@ failWhenNULL :: String -> IO (Ptr a) -> IO (Ptr a)
 failWhenNULL name f = do
    addr <- f
    if addr == nullPtr
-      then ioError (IOError Nothing ResourceExhausted name 
+      then ioError (IOError Nothing ResourceExhausted name
                                         "out of memory" Nothing Nothing)
       else return addr
 
@@ -228,5 +229,4 @@ foreign import ccall unsafe "stdlib.h free"    _free    :: Ptr a -> IO ()
 -- | A pointer to a foreign function equivalent to 'free', which may be
 -- used as a finalizer (cf 'Foreign.ForeignPtr.ForeignPtr') for storage
 -- allocated with 'malloc', 'mallocBytes', 'realloc' or 'reallocBytes'.
-foreign import ccall unsafe "stdlib.h &free" finalizerFree :: FinalizerPtr a
-
+foreign import capi unsafe "stdlib.h value free" finalizerFree :: FinalizerPtr a

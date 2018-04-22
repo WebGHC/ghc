@@ -17,7 +17,7 @@
 #include "HsBaseConfig.h"
 #include "rts/Libdw.h"
 
-{-# LANGUAGE MultiWayIf #-}
+{-# LANGUAGE MultiWayIf, CApiFFI #-}
 
 module GHC.ExecutionStack.Internal (
   -- * Internal
@@ -184,7 +184,7 @@ data Session
 foreign import ccall unsafe "libdwPoolTake"
     libdw_pool_take :: IO (Ptr Session)
 
-foreign import ccall unsafe "&libdwPoolRelease"
+foreign import capi unsafe "rts/LibdwPool.h value libdwPoolRelease"
     libdw_pool_release :: FunPtr (Ptr Session -> IO ())
 
 foreign import ccall unsafe "libdwPoolClear"
@@ -196,7 +196,7 @@ foreign import ccall unsafe "libdwLookupLocation"
 foreign import ccall unsafe "libdwGetBacktrace"
     libdw_get_backtrace :: Ptr Session -> IO (Ptr StackTrace)
 
-foreign import ccall unsafe "&backtraceFree"
+foreign import capi unsafe "rts/LibdwPool.h value backtraceFree"
     backtrace_free :: FunPtr (Ptr StackTrace -> IO ())
 
 -- | Get an execution stack.
