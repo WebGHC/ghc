@@ -287,7 +287,7 @@ pprNode node = pp_node <+> pp_debug
                , text "ret_off:" <+> ppr u
                , semi ]
 
-      CmmExternDecl _cconv lbl ret args -> text "extern" <+> ppr ret <+> pprCLabelString lbl <+> ppr args <+> semi
+      CmmExternDecl _cconv lbl ret args -> text "extern" <+> ppr ret <+> pprCLabelString lbl <+> ppr args <> semi
 
     pp_debug :: SDoc
     pp_debug =

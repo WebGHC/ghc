@@ -18,6 +18,8 @@ module StgCmmForeign (
   loadThreadState,
   emitOpenNursery,
   emitCloseNursery,
+  mkExternDeclFor,
+  mkExternDeclType,
  ) where
 
 #include "HsVersions.h"
@@ -86,7 +88,7 @@ cgForeignCall (CCall (CCallSpec target cconv safety)) stg_args res_ty
                                         Nothing         -> ForeignLabelInThisPackage
                                         Just pkgId      -> ForeignLabelInPackage pkgId
                             size = call_size cmm_args
-                        emit $ mkMiddle $ CmmExternDecl cconv lbl (zip res_regs res_hints) $ fmap (\(e,hint) -> (cmmExprType dflags e, hint)) cmm_args
+                        emit $ mkExternDeclFor dflags cconv (zip res_regs res_hints) lbl cmm_args
                         return ( unzip cmm_args
                                , CmmLit (CmmLabel
                                            (mkForeignLabel lbl size labelSource IsFunction)))
@@ -184,6 +186,21 @@ optimisation kicks in and commons up L1 with the heap-check
 continuation, resulting in just one proc point instead of two. Yay!
 -}
 
+
+mkExternDeclFor
+  :: DynFlags
+  -> CCallConv
+  -> [(CmmFormal, ForeignHint)]
+  -> CLabelString
+  -> [(CmmActual, ForeignHint)]
+  -> CmmAGraph
+mkExternDeclFor dflags conv ress lbl args =
+  let resTys = [ (localRegType l, h) | (l, h) <- ress ]
+      argTys = [ (cmmExprType dflags e, h) | (e, h) <- args ]
+  in  mkExternDeclType conv resTys lbl argTys
+
+mkExternDeclType :: CCallConv -> [(CmmType, ForeignHint)] -> CLabelString -> [(CmmType, ForeignHint)] -> CmmAGraph
+mkExternDeclType conv ress lbl args = mkMiddle $ CmmExternDecl conv lbl ress args
 
 emitCCall :: [(CmmFormal,ForeignHint)]
           -> CmmExpr

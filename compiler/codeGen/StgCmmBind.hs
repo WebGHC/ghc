@@ -30,7 +30,7 @@ import StgCmmTicky
 import StgCmmLayout
 import StgCmmUtils
 import StgCmmClosure
-import StgCmmForeign    (emitPrimCall)
+import StgCmmForeign    (emitPrimCall, mkExternDeclFor)
 
 import MkGraph
 import CoreSyn          ( AltCon(..), tickishIsCode )
@@ -52,6 +52,7 @@ import BasicTypes
 import Outputable
 import FastString
 import DynFlags
+import ForeignCall (CCallConv (CCallConv))
 
 import Control.Monad
 
@@ -717,9 +718,12 @@ link_caf node _is_upd = do
   ; let newCAF_lbl = mkForeignLabel (fsLit "newCAF") Nothing
                                     ForeignLabelInExternalPackage IsFunction
   ; bh <- newTemp (bWord dflags)
-  ; emitRtsCallGen [(bh,AddrHint)] newCAF_lbl
-      [ (CmmReg (CmmGlobal BaseReg),  AddrHint),
-        (CmmReg (CmmLocal node), AddrHint) ]
+  ; let ress = [(bh,AddrHint)]
+        args = [ (CmmReg (CmmGlobal BaseReg),  AddrHint),
+                 (CmmReg (CmmLocal node), AddrHint) ]
+  ; emit $ mkExternDeclFor dflags CCallConv ress (fsLit "newCAF") args
+  ; emitRtsCallGen ress newCAF_lbl
+      args
       False
 
   -- see Note [atomic CAF entry] in rts/sm/Storage.c

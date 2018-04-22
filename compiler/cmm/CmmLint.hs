@@ -160,7 +160,7 @@ lintCmmMiddle node = case node of
             lintTarget target
             mapM_ lintCmmExpr actuals
 
-  CmmExternDecl{} -> panic "NYI"
+  CmmExternDecl{} -> return () -- panic "NYI"
 
 
 lintCmmLast :: LabelSet -> CmmNode O C -> CmmLint ()

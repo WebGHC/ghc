@@ -218,6 +218,7 @@ hash_block dflags block =
                 CmmCall e _ _ _ _ _   -> hash_e env e
                 CmmForeignCall t _ _ _ _ _ _ -> hash_tgt env t
                 CmmSwitch e _   -> hash_e env e
+                CmmExternDecl _ _ _ _ -> 120
                 _               -> error "hash_node: unknown Cmm node!"
             env' = foldLocalRegsDefd dflags (flip bind_local_reg) env n
 

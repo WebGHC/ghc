@@ -45,6 +45,7 @@ import SMRep
 import FastString
 import Outputable
 import Util
+import ForeignCall      ( CCallConv(..) )
 
 import Data.Bits ((.&.), bit)
 import Control.Monad (liftM, when, unless)
@@ -274,14 +275,17 @@ emitPrimOp :: DynFlags
 -- First we handle various awkward cases specially.  The remaining
 -- easy cases are then handled by translateOp, defined below.
 
-emitPrimOp _ [res] ParOp [arg]
-  =
+emitPrimOp dflags [res] ParOp [arg]
+  = do
         -- for now, just implement this in a C function
         -- later, we might want to inline it.
+    let ress = [(res,NoHint)]
+        args = [(CmmReg (CmmGlobal BaseReg), AddrHint), (arg,AddrHint)]
+    emit $ mkExternDeclFor dflags CCallConv ress (fsLit "newSpark") args
     emitCCall
-        [(res,NoHint)]
+        ress
         (CmmLit (CmmLabel (mkForeignLabel (fsLit "newSpark") Nothing ForeignLabelInExternalPackage IsFunction)))
-        [(CmmReg (CmmGlobal BaseReg), AddrHint), (arg,AddrHint)]
+        args
 
 emitPrimOp dflags [res] SparkOp [arg]
   = do
@@ -290,10 +294,13 @@ emitPrimOp dflags [res] SparkOp [arg]
         -- assign to res), so put it in a temporary.
         tmp <- assignTemp arg
         tmp2 <- newTemp (bWord dflags)
+        let ress = [(tmp2,NoHint)]
+            args = [(CmmReg (CmmGlobal BaseReg), AddrHint), ((CmmReg (CmmLocal tmp)), AddrHint)]
+        emit $ mkExternDeclFor dflags CCallConv ress (fsLit "newSpark") args
         emitCCall
-            [(tmp2,NoHint)]
+            ress
             (CmmLit (CmmLabel (mkForeignLabel (fsLit "newSpark") Nothing ForeignLabelInExternalPackage IsFunction)))
-            [(CmmReg (CmmGlobal BaseReg), AddrHint), ((CmmReg (CmmLocal tmp)), AddrHint)]
+            args
         emitAssign (CmmLocal res) (CmmReg (CmmLocal tmp))
 
 emitPrimOp dflags [res] GetCCSOfOp [arg]
@@ -314,10 +321,13 @@ emitPrimOp dflags res@[] WriteMutVarOp [mutv,var]
         -- the writes for the closure it points to have occurred.
         emitPrimCall res MO_WriteBarrier []
         emitStore (cmmOffsetW dflags mutv (fixedHdrSizeW dflags)) var
+        let ress = []
+            args = [(CmmReg (CmmGlobal BaseReg), AddrHint), (mutv,AddrHint)]
+        emit $ mkExternDeclFor dflags CCallConv ress (fsLit "dirty_MUT_VAR") args
         emitCCall
-                [{-no results-}]
+                ress
                 (CmmLit (CmmLabel mkDirty_MUT_VAR_Label))
-                [(CmmReg (CmmGlobal BaseReg), AddrHint), (mutv,AddrHint)]
+                args
 
 --  #define sizzeofByteArrayzh(r,a) \
 --     r = ((StgArrBytes *)(a))->bytes
