@@ -6,7 +6,7 @@ module CmmLayoutStack (
 import GhcPrelude hiding ((<*>))
 
 import StgCmmUtils      ( callerSaveVolatileRegs ) -- XXX layering violation
-import StgCmmForeign    ( saveThreadState, loadThreadState ) -- XXX layering violation
+import StgCmmForeign    ( saveThreadState, loadThreadState, mkExternDeclFor ) -- XXX layering violation
 
 import BasicTypes
 import Cmm
@@ -1141,9 +1141,9 @@ lowerSafeForeignCall dflags block
     load_state_code <- loadThreadState dflags
     let suspend = save_state_code  <*>
                   caller_save <*>
-                  mkMiddle (callSuspendThread dflags id intrbl)
+                  callSuspendThread dflags id intrbl
         midCall = mkUnsafeCall tgt res args
-        resume  = mkMiddle (callResumeThread new_base id) <*>
+        resume  = callResumeThread dflags new_base id <*>
                   -- Assign the result to BaseReg: we
                   -- might now have a different Capability!
                   mkAssign baseReg (CmmReg (CmmLocal new_base)) <*>
@@ -1186,19 +1186,29 @@ lowerSafeForeignCall dflags block
 foreignLbl :: FastString -> CmmExpr
 foreignLbl name = CmmLit (CmmLabel (mkForeignLabel name Nothing ForeignLabelInExternalPackage IsFunction))
 
-callSuspendThread :: DynFlags -> LocalReg -> Bool -> CmmNode O O
+callSuspendThread :: DynFlags -> LocalReg -> Bool -> CmmAGraph
 callSuspendThread dflags id intrbl =
-  CmmUnsafeForeignCall
-       (ForeignTarget (foreignLbl (fsLit "suspendThread"))
-        (ForeignConvention CCallConv [AddrHint, NoHint] [AddrHint] CmmMayReturn))
-       [id] [baseExpr, mkIntExpr dflags (fromEnum intrbl)]
+  let ress = [(id, AddrHint)]
+      args = [(baseExpr, AddrHint), (mkIntExpr dflags (fromEnum intrbl), NoHint)]
+      decl = mkExternDeclFor dflags CCallConv ress (fsLit "suspendThread") args
+      call = mkMiddle $ CmmUnsafeForeignCall
+        (ForeignTarget (foreignLbl (fsLit "suspendThread"))
+                       (ForeignConvention CCallConv (map snd args) (map snd ress) CmmMayReturn)
+        )
+        (map fst ress)
+        (map fst args)
+  in  decl <*> call
 
-callResumeThread :: LocalReg -> LocalReg -> CmmNode O O
-callResumeThread new_base id =
-  CmmUnsafeForeignCall
+callResumeThread :: DynFlags -> LocalReg -> LocalReg -> CmmAGraph
+callResumeThread dflags new_base id =
+  let ress = [(new_base, AddrHint)]
+      args = [(CmmReg (CmmLocal id), AddrHint)]
+      decl = mkExternDeclFor dflags CCallConv ress (fsLit "resumeThread") args
+      call = mkMiddle $ CmmUnsafeForeignCall
        (ForeignTarget (foreignLbl (fsLit "resumeThread"))
-            (ForeignConvention CCallConv [AddrHint] [AddrHint] CmmMayReturn))
-       [new_base] [CmmReg (CmmLocal id)]
+            (ForeignConvention CCallConv (map snd args) (map snd ress) CmmMayReturn))
+       (map fst ress) (map fst args)
+  in decl <*> call
 
 -- -----------------------------------------------------------------------------
 

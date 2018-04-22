@@ -163,7 +163,12 @@ data CmmNode e x where
       intrbl:: Bool             -- whether or not the call is interruptible
   } -> CmmNode O C
 
-  CmmExternDecl :: CCallConv -> CLabelString -> [(CmmFormal, ForeignHint)] -> [(CmmType, ForeignHint)] -> CmmNode O O
+  CmmExternDecl :: {
+    ced_cconv :: CCallConv,
+    ced_label :: CLabelString,
+    ced_results :: [(CmmType, ForeignHint)],
+    ced_args :: [(CmmType, ForeignHint)]
+  } -> CmmNode O O
 
 {- Note [Foreign calls]
 ~~~~~~~~~~~~~~~~~~~~~~~

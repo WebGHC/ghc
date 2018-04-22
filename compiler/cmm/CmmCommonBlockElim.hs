@@ -152,6 +152,7 @@ hash_block block =
         hash_node (CmmCall e _ _ _ _ _) = hash_e e
         hash_node (CmmForeignCall t _ _ _ _ _ _) = hash_tgt t
         hash_node (CmmSwitch e _) = hash_e e
+        hash_node (CmmExternDecl _ _ _ _) = 120
         hash_node _ = error "hash_node: unknown Cmm node!"
 
         hash_reg :: CmmReg -> Word32
