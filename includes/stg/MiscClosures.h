@@ -64,13 +64,13 @@ RTS_RET(stg_stack_underflow_frame);
 RTS_RET(stg_restore_cccs);
 RTS_RET(stg_restore_cccs_eval);
 
-// RTS_FUN(stg_interp_constr1_entry);
-// RTS_FUN(stg_interp_constr2_entry);
-// RTS_FUN(stg_interp_constr3_entry);
-// RTS_FUN(stg_interp_constr4_entry);
-// RTS_FUN(stg_interp_constr5_entry);
-// RTS_FUN(stg_interp_constr6_entry);
-// RTS_FUN(stg_interp_constr7_entry);
+RTS_FUN(stg_interp_constr1);
+RTS_FUN(stg_interp_constr2);
+RTS_FUN(stg_interp_constr3);
+RTS_FUN(stg_interp_constr4);
+RTS_FUN(stg_interp_constr5);
+RTS_FUN(stg_interp_constr6);
+RTS_FUN(stg_interp_constr7);
 //
 // This is referenced using the FFI in the compiler (ByteCodeItbls),
 // so we can't give it the correct type here because the prototypes
