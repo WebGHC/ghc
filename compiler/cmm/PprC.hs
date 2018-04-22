@@ -140,9 +140,9 @@ pprTop (CmmData section (Statics lbl lits)) =
 --
 
 pprBBlock :: CmmBlock -> SDoc
-pprBBlock block = braces $
+pprBBlock block =
   nest 4 (pprBlockId (entryLabel block) <> colon) $$
-  nest 8 (vcat (map pprStmt (blockToList nodes)) $$ pprStmt last)
+  braces (nest 8 (vcat (map pprStmt (blockToList nodes)) $$ pprStmt last))
  where
   (_, nodes, last)  = blockSplit block
 
@@ -236,7 +236,7 @@ pprStmt stmt =
 
         ForeignConvention cconv _ _ ret = conv
 
-        cast_fn = parens (cCast (pprCFunType (char '*') cconv hresults (foo dflags hargs)) fn)
+        cast_fn = parens (cCast (pprCFunType (char '*') cconv hresults hargs) fn)
 
         -- See wiki:Commentary/Compiler/Backends/PprC#Prototypes
         fnCall =
@@ -250,9 +250,7 @@ pprStmt stmt =
                         -- can't add the @n suffix ourselves, because
                         -- it isn't valid C.
                 | CmmNeverReturns <- ret ->
-                    braces $
-                      (text "extern" <+> pprCFunType (ppr lbl) cconv hresults (foo dflags hargs) <+> text "__attribute__ ((noreturn))" <> semi) $$
-                      pprCall cast_fn cconv hresults hargs <> semi
+                    pprCall cast_fn cconv hresults hargs <> semi
                 | not (isMathFun lbl) ->
                     pprForeignCall (ppr lbl) cconv hresults hargs
               _ ->
@@ -263,10 +261,13 @@ pprStmt stmt =
     CmmUnsafeForeignCall (PrimTarget (MO_Prefetch_Data _)) _results _args -> empty
 
     CmmUnsafeForeignCall target@(PrimTarget op) results args ->
-        fn_call
+        braces $ externDecl $$ fn_call
       where
         cconv = CCallConv
         fn = pprCallishMachOp_for_C op
+        externDecl
+          | primopNeedsExternDecl op = text "extern" <+> pprCFunType fn cconv hresults hargs <> semi
+          | otherwise = empty
 
         (res_hints, arg_hints) = foreignTargetHints target
         hresults = zip results res_hints
@@ -287,39 +288,71 @@ pprStmt stmt =
     CmmCall { cml_target = expr } -> mkJMP_ (pprExpr expr) <> semi
     CmmSwitch arg ids        -> sdocWithDynFlags $ \dflags ->
                                 pprSwitch dflags arg ids
-    CmmExternDecl cconv lbl res args -> text "extern" <+> pprCFunType (pprCLabelString lbl) cconv res args <+> semi
+    CmmExternDecl cconv lbl res args -> text "extern" <+> pprCFunTypeWithTypes (pprCLabelString lbl) cconv res args <> semi
 
     _other -> pprPanic "PprC.pprStmt" (ppr stmt)
+
+-- Some primops use C functions that aren't in scope by given just
+-- Stg.h. This function tells which primops need an extern declaration
+-- to bring them in scope.
+--
+-- Some primops call a C function that is in fact in scope, but with
+-- arguments / results of different types than the C function's
+-- visible declaration. So we rely on the visible declaration instead
+-- of a local extern to implicitly cast the types; otherwise we'd be
+-- declaring those functions with the wrong types, and cc would
+-- complain that the extern type is incompatible with the visible
+-- type.
+--
+-- Alternative fixes: 1) We could blacklist primops that need to use
+-- the already-visible type instead of whitelisting primops that need
+-- externs. 2) We could do an extern-fixup, changing the extern
+-- declarations of primops that we know need a different type than
+-- their parameters / results. 3) We could simply add the declarations
+-- for the functions that aren't in scope to Stg.h.
+primopNeedsExternDecl :: CallishMachOp -> Bool
+primopNeedsExternDecl (MO_Memcpy _) = True
+primopNeedsExternDecl (MO_Memset _) = True
+primopNeedsExternDecl (MO_Memmove _) = True
+primopNeedsExternDecl (MO_Memcmp _) = True
+primopNeedsExternDecl _ = False
 
 type Hinted a = (a, ForeignHint)
 
 pprForeignCall :: SDoc -> CCallConv -> [Hinted CmmFormal] -> [Hinted CmmActual]
                -> SDoc
-pprForeignCall fn cconv results args = sdocWithDynFlags $ \dflags ->
-  let
+pprForeignCall fn cconv results args = fn_call
+  where
     fn_call = braces (
-                 (text "extern" <+> pprCFunType fn cconv results arg_tys <> semi)
-              $$ pprCFunType (char '*' <> text "ghcFunPtr") cconv results arg_tys <> semi
+                 pprCFunType (char '*' <> text "ghcFunPtr") cconv results args <> semi
               $$ text "ghcFunPtr" <+> equals <+> cast_fn <> semi
               $$ pprCall (text "ghcFunPtr") cconv results args <> semi
              )
-    cast_fn = parens (parens (pprCFunType (char '*') cconv results arg_tys) <> fn)
-    arg_tys = foo dflags args
-  in fn_call
+    cast_fn = parens (parens (pprCFunType (char '*') cconv results args) <> fn)
 
-foo :: DynFlags -> [Hinted CmmActual] -> [Hinted CmmType]
-foo dflags = map (\(expr, hint) -> (cmmExprType dflags expr, hint))
+pprCFunType :: SDoc -> CCallConv -> [Hinted CmmFormal] -> [Hinted CmmActual] -> SDoc
+pprCFunType ppr_fn cconv ress args = sdocWithDynFlags
+  $ \dflags -> pprCFunTypeWithTypes ppr_fn cconv ressTypes (argsTypes dflags)
+ where
+  ressTypes = fmap (\(x, h) -> (localRegType x, h)) ress
+  argsTypes dflags = fmap (\(e, h) -> (cmmExprType dflags e, h)) args
 
-pprCFunType :: SDoc -> CCallConv -> [Hinted CmmFormal] -> [Hinted CmmType] -> SDoc
-pprCFunType ppr_fn cconv ress args
-  = let res_type [] = text "void"
-        res_type [(one, hint)] = machRepHintCType (localRegType one) hint
+pprCFunTypeWithTypes :: SDoc -> CCallConv -> [Hinted CmmType] -> [Hinted CmmType] -> SDoc
+pprCFunTypeWithTypes ppr_fn cconv ress args
+  = sdocWithDynFlags $ \dflags ->
+    let res_type [] = text "void"
+        res_type [(one, hint)] = machRepHintCType one hint
         res_type _ = panic "pprCFunType: only void or 1 return value supported"
 
         arg_type (ty, hint) = machRepHintCType ty hint
+
+        -- When there are no arguments, don't accidentally use
+        -- varargs. Varargs has a separate ABI on wasm.
+        voidCommafy [] = text "void"
+        voidCommafy xs = commafy xs
     in res_type ress <+>
        parens (ccallConvAttribute cconv <> ppr_fn) <>
-       parens (commafy (map arg_type args))
+       parens (voidCommafy (map arg_type args))
 
 -- ---------------------------------------------------------------------
 -- unconditional branches

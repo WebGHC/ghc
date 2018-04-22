@@ -322,6 +322,7 @@ import qualified Data.Map as M
         'reserve'       { L _ (CmmT_reserve) }
         'return'        { L _ (CmmT_return) }
         'returns'       { L _ (CmmT_returns) }
+        'cextern'       { L _ (CmmT_cextern) }
         'import'        { L _ (CmmT_import) }
         'switch'        { L _ (CmmT_switch) }
         'case'          { L _ (CmmT_case) }
@@ -557,9 +558,15 @@ body    :: { CmmParse () }
 
 decl    :: { CmmParse () }
         : type names ';'                { mapM_ (newLocal $1) $2 }
+        | 'cextern' type NAME '(' types ')' ';' { emit $ mkExternDeclType CCallConv [($2, NoHint)] $3 [(x,NoHint) | x <- $5] }
         | 'import' importNames ';'      { mapM_ newImport $2 }
         | 'export' names ';'            { return () }  -- ignore exports
 
+
+types   :: { [CmmType] }
+        : {- empty -}                   { [] }
+        | type                          { [$1] }
+        | type ',' types                { $1 : $3 }
 
 -- an imported function name, with optional packageId
 importNames
@@ -657,8 +664,8 @@ expr_or_unknown
         | expr
                 { do e <- $1; return (Just e) }
 
-foreignLabel     :: { CmmParse CmmExpr }
-        : NAME                          { return (CmmLit (CmmLabel (mkForeignLabel $1 Nothing ForeignLabelInThisPackage IsFunction))) }
+foreignLabel     :: { CLabelString }
+        : NAME                          { $1 }
 
 opt_never_returns :: { CmmReturnInfo }
         :                               { CmmMayReturn }
@@ -1178,12 +1185,12 @@ staticClosure pkg cl_label info payload
 foreignCall
         :: String
         -> [CmmParse (LocalReg, ForeignHint)]
-        -> CmmParse CmmExpr
+        -> CLabelString
         -> [CmmParse (CmmExpr, ForeignHint)]
         -> Safety
         -> CmmReturnInfo
         -> PD (CmmParse ())
-foreignCall conv_string results_code expr_code args_code safety ret
+foreignCall conv_string results_code lbl args_code safety ret
   = do  conv <- case conv_string of
           "C" -> return CCallConv
           "stdcall" -> return StdCallConv
@@ -1191,14 +1198,16 @@ foreignCall conv_string results_code expr_code args_code safety ret
         return $ do
           dflags <- getDynFlags
           results <- sequence results_code
-          expr <- expr_code
           args <- sequence args_code
           let
-                  expr' = adjCallTarget dflags conv expr args
+                  lbl'' = mkForeignLabel lbl Nothing ForeignLabelInThisPackage IsFunction
+                  lbl' = adjCallTarget dflags conv lbl'' args
                   (arg_exprs, arg_hints) = unzip args
                   (res_regs,  res_hints) = unzip results
                   fc = ForeignConvention conv arg_hints res_hints ret
-                  target = ForeignTarget expr' fc
+                  target = ForeignTarget (CmmLit (CmmLabel lbl')) fc
+                  foo dflags = map (\(expr, hint) -> (cmmExprType dflags expr, hint))
+          when (conv == CCallConv) $ emit $ mkMiddle $ CmmExternDecl conv lbl [(localRegType l, h) | (l, h) <- results] (foo dflags args)
           _ <- code $ emitForeignCall safety res_regs target arg_exprs
           return ()
 
@@ -1244,17 +1253,17 @@ doCall expr_code res_code args_code = do
   c <- code $ mkCall expr (NativeNodeCall,NativeReturn) ress args updfr_off []
   emit c
 
-adjCallTarget :: DynFlags -> CCallConv -> CmmExpr -> [(CmmExpr, ForeignHint) ]
-              -> CmmExpr
+adjCallTarget :: DynFlags -> CCallConv -> CLabel -> [(CmmExpr, ForeignHint) ]
+              -> CLabel
 -- On Windows, we have to add the '@N' suffix to the label when making
 -- a call with the stdcall calling convention.
-adjCallTarget dflags StdCallConv (CmmLit (CmmLabel lbl)) args
+adjCallTarget dflags StdCallConv lbl args
  | platformOS (targetPlatform dflags) == OSMinGW32
-  = CmmLit (CmmLabel (addLabelSize lbl (sum (map size args))))
+  = addLabelSize lbl (sum (map size args))
   where size (e, _) = max (wORD_SIZE dflags) (widthInBytes (typeWidth (cmmExprType dflags e)))
                  -- c.f. CgForeignCall.emitForeignCall
-adjCallTarget _ _ expr _
-  = expr
+adjCallTarget _ _ lbl _
+  = lbl
 
 primCall
         :: [CmmParse (CmmFormal, ForeignHint)]
