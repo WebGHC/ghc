@@ -261,14 +261,10 @@ pprStmt stmt =
     CmmUnsafeForeignCall (PrimTarget (MO_Prefetch_Data _)) _results _args -> empty
 
     CmmUnsafeForeignCall target@(PrimTarget op) results args ->
-        braces $ externDecl $$ fn_call
+        braces $ primopExternDecl op $$ fn_call
       where
         cconv = CCallConv
         fn = pprCallishMachOp_for_C op
-        externDecl
-          | primopNeedsExternDecl op = text "extern" <+> pprCFunType fn cconv hresults hargs <> semi
-          | otherwise = empty
-
         (res_hints, arg_hints) = foreignTargetHints target
         hresults = zip results res_hints
         hargs    = zip args arg_hints
@@ -310,12 +306,12 @@ pprStmt stmt =
 -- declarations of primops that we know need a different type than
 -- their parameters / results. 3) We could simply add the declarations
 -- for the functions that aren't in scope to Stg.h.
-primopNeedsExternDecl :: CallishMachOp -> Bool
-primopNeedsExternDecl (MO_Memcpy _) = True
-primopNeedsExternDecl (MO_Memset _) = True
-primopNeedsExternDecl (MO_Memmove _) = True
-primopNeedsExternDecl (MO_Memcmp _) = True
-primopNeedsExternDecl _ = False
+primopExternDecl :: CallishMachOp -> SDoc
+primopExternDecl (MO_Memcpy _) = text "extern void *memcpy(void *, void *, W_);"
+primopExternDecl (MO_Memset _) = text "extern void *memset(void *, int, W_);"
+primopExternDecl (MO_Memmove _) = text "extern void *memmove(void *, void *, W_);"
+primopExternDecl (MO_Memcmp _) = text "extern int memcmp(void *, void *, W_);"
+primopExternDecl _ = empty
 
 type Hinted a = (a, ForeignHint)
 
@@ -338,8 +334,7 @@ pprCFunType ppr_fn cconv ress args = sdocWithDynFlags
   argsTypes dflags = fmap (\(e, h) -> (cmmExprType dflags e, h)) args
 
 pprCFunTypeWithTypes :: SDoc -> CCallConv -> [Hinted CmmType] -> [Hinted CmmType] -> SDoc
-pprCFunTypeWithTypes ppr_fn cconv ress args
-  = sdocWithDynFlags $ \dflags ->
+pprCFunTypeWithTypes ppr_fn cconv ress args =
     let res_type [] = text "void"
         res_type [(one, hint)] = machRepHintCType one hint
         res_type _ = panic "pprCFunType: only void or 1 return value supported"
