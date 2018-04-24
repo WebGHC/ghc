@@ -149,7 +149,7 @@ debugSplitProcs b = concat $ H.mapElems $ mergeMaps $ map (split Nothing) b
 {-
 Note [Splitting DebugBlocks]
 
-DWARF requires that we break up the the nested DebugBlocks produced from
+DWARF requires that we break up the nested DebugBlocks produced from
 the C-- AST. For instance, we begin with tick trees containing nested procs.
 For example,
 
@@ -182,10 +182,17 @@ procToDwarf df prc
                          _otherwise -> showSDocDump df $ ppr $ dblLabel prc
                     , dwLabel    = dblCLabel prc
                     , dwParent   = fmap mkAsmTempDieLabel
-                                   $ mfilter (/= dblCLabel prc)
+                                   $ mfilter goodParent
                                    $ fmap dblCLabel (dblParent prc)
-                      -- Omit parent if it would be self-referential
                     }
+  where
+  goodParent a | a == dblCLabel prc = False
+               -- Omit parent if it would be self-referential
+  goodParent a | not (externallyVisibleCLabel a)
+               , debugLevel df < 2 = False
+               -- We strip block information when running -g0 or -g1, don't
+               -- refer to blocks in that case. Fixes #14894.
+  goodParent _ = True
 
 -- | Generate DWARF info for a block
 blockToDwarf :: DynFlags -> DebugBlock -> DwarfInfo

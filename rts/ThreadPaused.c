@@ -149,7 +149,7 @@ stackSqueeze(Capability *cap, StgTSO *tso, StgPtr bottom)
     //     | ********* |
     //    -| ********* |
     //
-    // 'sp'  points the the current top-of-stack
+    // 'sp'  points the current top-of-stack
     // 'gap' points to the stack_gap structure inside the gap
     // *****   indicates real stack data
     // .....   indicates gap
@@ -329,6 +329,10 @@ threadPaused(Capability *cap, StgTSO *tso)
 
             if (cur_bh_info != bh_info) {
                 bh_info = cur_bh_info;
+#if defined(PROF_SPIN)
+                ++whitehole_threadPaused_spin;
+#endif
+                busy_wait_nop();
                 goto retry;
             }
 #endif

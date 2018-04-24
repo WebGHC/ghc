@@ -45,7 +45,7 @@ module TcMType (
   newEvVar, newEvVars, newDict,
   newWanted, newWanteds, cloneWanted, cloneWC,
   emitWanted, emitWantedEq, emitWantedEvVar, emitWantedEvVars,
-  newTcEvBinds, addTcEvBind,
+  newTcEvBinds, newNoTcEvBinds, addTcEvBind,
 
   newCoercionHole, fillCoercionHole, isFilledCoercionHole,
   unpackCoercionHole, unpackCoercionHole_maybe,
@@ -55,20 +55,21 @@ module TcMType (
   -- Instantiation
   newMetaTyVars, newMetaTyVarX, newMetaTyVarsX,
   newMetaSigTyVars, newMetaSigTyVarX,
-  newSigTyVar, newWildCardX,
+  newSigTyVar, newSkolemTyVar, newWildCardX,
   tcInstType,
   tcInstSkolTyVars,tcInstSkolTyVarsX,
   tcInstSuperSkolTyVarsX,
   tcSkolDFunType, tcSuperSkolTyVars,
 
-  instSkolTyCoVars, freshenTyVarBndrs, freshenCoVarBndrsX,
+  instSkolTyCoVarsX, freshenTyVarBndrs, freshenCoVarBndrsX,
 
   --------------------------------
   -- Zonking and tidying
   zonkTidyTcType, zonkTidyOrigin,
   tidyEvVar, tidyCt, tidySkolemInfo,
   skolemiseRuntimeUnk,
-  zonkTcTyVar, zonkTcTyVars, zonkTcTyVarToTyVar,
+  zonkTcTyVar, zonkTcTyVars,
+  zonkTcTyVarToTyVar, zonkSigTyVarPairs,
   zonkTyCoVarsAndFV, zonkTcTypeAndFV,
   zonkTyCoVarsAndFVList,
   zonkTcTypeAndSplitDepVars, zonkTcTypesAndSplitDepVars,
@@ -77,8 +78,11 @@ module TcMType (
   zonkTcTyCoVarBndr, zonkTcTyVarBinder,
   zonkTcType, zonkTcTypes, zonkCo,
   zonkTyCoVarKind, zonkTcTypeMapper,
+  zonkTcTypeInKnot,
 
-  zonkEvVar, zonkWC, zonkSimples, zonkId, zonkCt, zonkSkolemInfo,
+  zonkEvVar, zonkWC, zonkSimples,
+  zonkId, zonkCoVar,
+  zonkCt, zonkSkolemInfo,
 
   tcGetGlobalTyCoVars,
 
@@ -144,6 +148,7 @@ newMetaKindVar :: TcM TcKind
 newMetaKindVar = do { uniq <- newUnique
                     ; details <- newMetaDetails TauTv
                     ; let kv = mkTcTyVar (mkKindName uniq) liftedTypeKind details
+                    ; traceTc "newMetaKindVar" (ppr kv)
                     ; return (mkTyVarTy kv) }
 
 newMetaKindVars :: Int -> TcM [TcKind]
@@ -171,7 +176,7 @@ newWanted :: CtOrigin -> Maybe TypeOrKind -> PredType -> TcM CtEvidence
 -- Deals with both equality and non-equality predicates
 newWanted orig t_or_k pty
   = do loc <- getCtLocM orig t_or_k
-       d <- if isEqPred pty then HoleDest  <$> newCoercionHole
+       d <- if isEqPred pty then HoleDest  <$> newCoercionHole pty
                             else EvVarDest <$> newEvVar pty
        return $ CtWanted { ctev_dest = d
                          , ctev_pred = pty
@@ -200,21 +205,21 @@ cloneWC wc@(WC { wc_simple = simples, wc_impl = implics })
            ; return (implic { ic_wanted = inner_wanted' }) }
 
 -- | Emits a new Wanted. Deals with both equalities and non-equalities.
-emitWanted :: CtOrigin -> TcPredType -> TcM EvTerm
+emitWanted :: CtOrigin -> TcPredType -> TcM EvExpr
 emitWanted origin pty
   = do { ev <- newWanted origin Nothing pty
        ; emitSimple $ mkNonCanonical ev
-       ; return $ ctEvTerm ev }
+       ; return $ ctEvExpr ev }
 
 -- | Emits a new equality constraint
 emitWantedEq :: CtOrigin -> TypeOrKind -> Role -> TcType -> TcType -> TcM Coercion
 emitWantedEq origin t_or_k role ty1 ty2
-  = do { hole <- newCoercionHole
+  = do { hole <- newCoercionHole pty
        ; loc <- getCtLocM origin (Just t_or_k)
        ; emitSimple $ mkNonCanonical $
          CtWanted { ctev_pred = pty, ctev_dest = HoleDest hole
                   , ctev_nosh = WDeriv, ctev_loc = loc }
-       ; return (mkHoleCo hole role ty1 ty2) }
+       ; return (HoleCo hole) }
   where
     pty = mkPrimEqPredRole role ty1 ty2
 
@@ -253,28 +258,28 @@ predTypeOccName ty = case classifyPredType ty of
 ************************************************************************
 -}
 
-newCoercionHole :: TcM CoercionHole
-newCoercionHole
-  = do { u <- newUnique
-       ; traceTc "New coercion hole:" (ppr u)
+newCoercionHole :: TcPredType -> TcM CoercionHole
+newCoercionHole pred_ty
+  = do { co_var <- newEvVar pred_ty
+       ; traceTc "New coercion hole:" (ppr co_var)
        ; ref <- newMutVar Nothing
-       ; return $ CoercionHole u ref }
+       ; return $ CoercionHole { ch_co_var = co_var, ch_ref = ref } }
 
 -- | Put a value in a coercion hole
 fillCoercionHole :: CoercionHole -> Coercion -> TcM ()
-fillCoercionHole (CoercionHole u ref) co
+fillCoercionHole (CoercionHole { ch_ref = ref, ch_co_var = cv }) co
   = do {
 #if defined(DEBUG)
        ; cts <- readTcRef ref
        ; whenIsJust cts $ \old_co ->
-         pprPanic "Filling a filled coercion hole" (ppr u $$ ppr co $$ ppr old_co)
+         pprPanic "Filling a filled coercion hole" (ppr cv $$ ppr co $$ ppr old_co)
 #endif
-       ; traceTc "Filling coercion hole" (ppr u <+> text ":=" <+> ppr co)
+       ; traceTc "Filling coercion hole" (ppr cv <+> text ":=" <+> ppr co)
        ; writeTcRef ref (Just co) }
 
 -- | Is a coercion hole filled in?
 isFilledCoercionHole :: CoercionHole -> TcM Bool
-isFilledCoercionHole (CoercionHole _ ref) = isJust <$> readTcRef ref
+isFilledCoercionHole (CoercionHole { ch_ref = ref }) = isJust <$> readTcRef ref
 
 -- | Retrieve the contents of a coercion hole. Panics if the hole
 -- is unfilled
@@ -287,29 +292,35 @@ unpackCoercionHole hole
 
 -- | Retrieve the contents of a coercion hole, if it is filled
 unpackCoercionHole_maybe :: CoercionHole -> TcM (Maybe Coercion)
-unpackCoercionHole_maybe (CoercionHole _ ref) = readTcRef ref
+unpackCoercionHole_maybe (CoercionHole { ch_ref = ref }) = readTcRef ref
 
 -- | Check that a coercion is appropriate for filling a hole. (The hole
 -- itself is needed only for printing. NB: This must be /lazy/ in the coercion,
 -- as it's used in TcHsSyn in the presence of knots.
 -- Always returns the checked coercion, but this return value is necessary
 -- so that the input coercion is forced only when the output is forced.
-checkCoercionHole :: Coercion -> CoercionHole -> Role -> Type -> Type -> TcM Coercion
-checkCoercionHole co h r t1 t2
--- co is already zonked, but t1 and t2 might not be
+checkCoercionHole :: CoVar -> Coercion -> TcM Coercion
+checkCoercionHole cv co
   | debugIsOn
-  = do { t1 <- zonkTcType t1
-       ; t2 <- zonkTcType t2
-       ; let (Pair _t1 _t2, _role) = coercionKindRole co
+  = do { cv_ty <- zonkTcType (varType cv)
+                  -- co is already zonked, but cv might not be
        ; return $
-         ASSERT2( t1 `eqType` _t1 && t2 `eqType` _t2 && r == _role
+         ASSERT2( ok cv_ty
                 , (text "Bad coercion hole" <+>
-                   ppr h <> colon <+> vcat [ ppr _t1, ppr _t2, ppr _role
-                                           , ppr co, ppr t1, ppr t2
-                                           , ppr r ]) )
+                   ppr cv <> colon <+> vcat [ ppr t1, ppr t2, ppr role
+                                            , ppr cv_ty ]) )
          co }
   | otherwise
   = return co
+
+  where
+    (Pair t1 t2, role) = coercionKindRole co
+    ok cv_ty | EqPred cv_rel cv_t1 cv_t2 <- classifyPredType cv_ty
+             =  t1 `eqType` cv_t1
+             && t2 `eqType` cv_t2
+             && role == eqRelRole cv_rel
+             | otherwise
+             = False
 
 {-
 ************************************************************************
@@ -500,10 +511,11 @@ tcInstSkolTyVars' overlappable subst tvs
        ; lvl <- getTcLevel
        ; instSkolTyCoVarsX (mkTcSkolTyVar lvl loc overlappable) subst tvs }
 
-mkTcSkolTyVar :: TcLevel -> SrcSpan -> Bool -> TcTyVarMaker
-mkTcSkolTyVar lvl loc overlappable
-  = \ uniq old_name kind -> mkTcTyVar (mkInternalName uniq (getOccName old_name) loc)
-                                      kind details
+mkTcSkolTyVar :: TcLevel -> SrcSpan -> Bool -> TcTyCoVarMaker gbl lcl
+mkTcSkolTyVar lvl loc overlappable old_name kind
+  = do { uniq <- newUnique
+       ; let name = mkInternalName uniq (getOccName old_name) loc
+       ; return (mkTcTyVar name kind details) }
   where
     details = SkolemTv (pushTcLevel lvl) overlappable
               -- NB: skolems bump the level
@@ -515,31 +527,36 @@ freshenTyVarBndrs :: [TyVar] -> TcRnIf gbl lcl (TCvSubst, [TyVar])
 -- Used in FamInst.newFamInst, and Inst.newClsInst
 freshenTyVarBndrs = instSkolTyCoVars mk_tv
   where
-    mk_tv uniq old_name kind = mkTyVar (setNameUnique old_name uniq) kind
+    mk_tv old_name kind
+       = do { uniq <- newUnique
+            ; return (mkTyVar (setNameUnique old_name uniq) kind) }
 
 freshenCoVarBndrsX :: TCvSubst -> [CoVar] -> TcRnIf gbl lcl (TCvSubst, [CoVar])
 -- ^ Give fresh uniques to a bunch of CoVars
 -- Used in FamInst.newFamInst
 freshenCoVarBndrsX subst = instSkolTyCoVarsX mk_cv subst
   where
-    mk_cv uniq old_name kind = mkCoVar (setNameUnique old_name uniq) kind
+    mk_cv old_name kind
+      = do { uniq <- newUnique
+           ; return (mkCoVar (setNameUnique old_name uniq) kind) }
 
 ------------------
-type TcTyVarMaker = Unique -> Name -> Kind -> TyCoVar
-instSkolTyCoVars :: TcTyVarMaker -> [TyVar] -> TcRnIf gbl lcl (TCvSubst, [TyCoVar])
+type TcTyCoVarMaker gbl lcl = Name -> Kind -> TcRnIf gbl lcl TyCoVar
+     -- The TcTyCoVarMaker should make a fresh Name, based on the old one
+     -- Freshness is critical. See Note [Skolems in zonkSyntaxExpr] in TcHsSyn
+
+instSkolTyCoVars :: TcTyCoVarMaker gbl lcl -> [TyVar] -> TcRnIf gbl lcl (TCvSubst, [TyCoVar])
 instSkolTyCoVars mk_tcv = instSkolTyCoVarsX mk_tcv emptyTCvSubst
 
-instSkolTyCoVarsX :: TcTyVarMaker
+instSkolTyCoVarsX :: TcTyCoVarMaker gbl lcl
                   -> TCvSubst -> [TyCoVar] -> TcRnIf gbl lcl (TCvSubst, [TyCoVar])
 instSkolTyCoVarsX mk_tcv = mapAccumLM (instSkolTyCoVarX mk_tcv)
 
-instSkolTyCoVarX :: TcTyVarMaker
+instSkolTyCoVarX :: TcTyCoVarMaker gbl lcl
                  -> TCvSubst -> TyCoVar -> TcRnIf gbl lcl (TCvSubst, TyCoVar)
 instSkolTyCoVarX mk_tcv subst tycovar
-  = do  { uniq <- newUnique  -- using a new unique is critical. See
-                             -- Note [Skolems in zonkSyntaxExpr] in TcHsSyn
-        ; let new_tcv = mk_tcv uniq old_name kind
-              subst1 | isTyVar new_tcv
+  = do  { new_tcv <- mk_tcv old_name kind
+        ; let subst1 | isTyVar new_tcv
                      = extendTvSubstWithClone subst tycovar new_tcv
                      | otherwise
                      = extendCvSubstWithClone subst tycovar new_tcv
@@ -582,10 +599,24 @@ instead of the buggous
 ************************************************************************
 -}
 
+-- a SigTv can unify with type *variables* only, including other SigTvs
+-- and skolems. Sometimes, they can unify with type variables that the
+-- user would rather keep distinct; see #11203 for an example.
+-- So, any client of this
+-- function needs to either allow the SigTvs to unify with each other
+-- (say, for pattern-bound scoped type variables), or check that they
+-- don't (say, with a call to findDubSigTvs).
 newSigTyVar :: Name -> Kind -> TcM TcTyVar
 newSigTyVar name kind
   = do { details <- newMetaDetails SigTv
-       ; return (mkTcTyVar name kind details) }
+       ; let tyvar = mkTcTyVar name kind details
+       ; traceTc "newSigTyVar" (ppr tyvar)
+       ; return tyvar }
+
+-- makes a new skolem tv
+newSkolemTyVar :: Name -> Kind -> TcM TcTyVar
+newSkolemTyVar name kind = do { lvl <- getTcLevel
+                              ; return (mkTcTyVar name kind (SkolemTv lvl False)) }
 
 newFmvTyVar :: TcType -> TcM TcTyVar
 -- Very like newMetaTyVar, except sets mtv_tclvl to one less
@@ -616,7 +647,9 @@ cloneMetaTyVar tv
               details' = case tcTyVarDetails tv of
                            details@(MetaTv {}) -> details { mtv_ref = ref }
                            _ -> pprPanic "cloneMetaTyVar" (ppr tv)
-        ; return (mkTcTyVar name' (tyVarKind tv) details') }
+              tyvar = mkTcTyVar name' (tyVarKind tv) details'
+        ; traceTc "cloneMetaTyVar" (ppr tyvar)
+        ; return tyvar }
 
 -- Works for both type and kind variables
 readMetaTyVar :: TyVar -> TcM MetaDetails
@@ -675,10 +708,10 @@ writeMetaTyVarRef tyvar ref ty
   = do { meta_details <- readMutVar ref;
        -- Zonk kinds to allow the error check to work
        ; zonked_tv_kind <- zonkTcType tv_kind
-       ; zonked_ty_kind <- zonkTcType ty_kind
-       ; let kind_check_ok = isPredTy tv_kind  -- Don't check kinds for updates
-                                               -- to coercion variables.  Why not??
-                          || isConstraintKind zonked_tv_kind
+       ; zonked_ty      <- zonkTcType ty
+       ; let zonked_ty_kind = typeKind zonked_ty  -- need to zonk even before typeKind;
+                                                  -- otherwise, we can panic in piResultTy
+             kind_check_ok = isConstraintKind zonked_tv_kind
                           || tcEqKind zonked_ty_kind zonked_tv_kind
              -- Hack alert! isConstraintKind: see TcHsType
              -- Note [Extra-constraint holes in partial type signatures]
@@ -686,7 +719,7 @@ writeMetaTyVarRef tyvar ref ty
              kind_msg = hang (text "Ill-kinded update to meta tyvar")
                            2 (    ppr tyvar <+> text "::" <+> (ppr tv_kind $$ ppr zonked_tv_kind)
                               <+> text ":="
-                              <+> ppr ty <+> text "::" <+> (ppr ty_kind $$ ppr zonked_ty_kind) )
+                              <+> ppr ty <+> text "::" <+> (ppr zonked_ty_kind) )
 
        ; traceTc "writeMetaTyVar" (ppr tyvar <+> text ":=" <+> ppr ty)
 
@@ -704,7 +737,6 @@ writeMetaTyVarRef tyvar ref ty
        ; writeMutVar ref (Indirect ty) }
   where
     tv_kind = tyVarKind tyvar
-    ty_kind = typeKind ty
 
     tv_lvl = tcTyVarLevel tyvar
     ty_lvl = tcTypeLevel ty
@@ -779,7 +811,9 @@ newAnonMetaTyVar meta_info kind
                         FlatSkolTv  -> fsLit "fsk"
                         SigTv       -> fsLit "a"
         ; details <- newMetaDetails meta_info
-        ; return (mkTcTyVar name kind details) }
+        ; let tyvar = mkTcTyVar name kind details
+        ; traceTc "newAnonMetaTyVar" (ppr tyvar)
+        ; return tyvar }
 
 cloneAnonMetaTyVar :: MetaInfo -> TyVar -> TcKind -> TcM TcTyVar
 -- Same as newAnonMetaTyVar, but use a supplied TyVar as the source of the print-name
@@ -788,7 +822,9 @@ cloneAnonMetaTyVar info tv kind
         ; details <- newMetaDetails info
         ; let name = mkSystemName uniq (getOccName tv)
                        -- See Note [Name of an instantiated type variable]
-        ; return (mkTcTyVar name kind details) }
+              tyvar = mkTcTyVar name kind details
+        ; traceTc "cloneAnonMetaTyVar" (ppr tyvar)
+        ; return tyvar }
 
 {- Note [Name of an instantiated type variable]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -899,7 +935,7 @@ also free in the type.  Eg
      Typeable k (a::k)
 has free vars {k,a}.  But the type (see Trac #7916)
     (f::k->*) (a::k)
-has free vars {f,a}, but we must add 'k' as well! Hence step (3).
+has free vars {f,a}, but we must add 'k' as well! Hence step (2).
 
 * This function distinguishes between dependent and non-dependent
   variables only to keep correct defaulting behavior with -XNoPolyKinds.
@@ -934,15 +970,11 @@ quantifyTyVars
 
 quantifyTyVars gbl_tvs dvs@(DV{ dv_kvs = dep_tkvs, dv_tvs = nondep_tkvs })
   = do { traceTc "quantifyTyVars" (vcat [ppr dvs, ppr gbl_tvs])
-       ; let all_cvs = filterVarSet isCoVar $ dVarSetToVarSet dep_tkvs
-             dep_kvs = dVarSetElemsWellScoped $
+       ; let dep_kvs = dVarSetElemsWellScoped $
                        dep_tkvs `dVarSetMinusVarSet` gbl_tvs
-                                `dVarSetMinusVarSet` closeOverKinds all_cvs
-                 -- dVarSetElemsWellScoped: put the kind variables into
-                 --    well-scoped order.
-                 --    E.g.  [k, (a::k)] not the other way roud
-                 -- closeOverKinds all_cvs: do not quantify over coercion
-                 --    variables, or any any tvs that a covar depends on
+                       -- dVarSetElemsWellScoped: put the kind variables into
+                       --    well-scoped order.
+                       --    E.g.  [k, (a::k)] not the other way roud
 
              nondep_tvs = dVarSetElems $
                           (nondep_tkvs `minusDVarSet` dep_tkvs)
@@ -965,6 +997,7 @@ quantifyTyVars gbl_tvs dvs@(DV{ dv_kvs = dep_tkvs, dv_tvs = nondep_tkvs })
        ; poly_kinds  <- xoptM LangExt.PolyKinds
        ; dep_kvs'    <- mapMaybeM (zonk_quant (not poly_kinds)) dep_kvs
        ; nondep_tvs' <- mapMaybeM (zonk_quant False)            nondep_tvs
+       ; let final_qtvs = dep_kvs' ++ nondep_tvs'
            -- Because of the order, any kind variables
            -- mentioned in the kinds of the nondep_tvs'
            -- now refer to the dep_kvs'
@@ -976,13 +1009,21 @@ quantifyTyVars gbl_tvs dvs@(DV{ dv_kvs = dep_tkvs, dv_tvs = nondep_tkvs })
                  , text "dep_kvs'" <+> pprTyVars dep_kvs'
                  , text "nondep_tvs'" <+> pprTyVars nondep_tvs' ])
 
-       ; return (dep_kvs' ++ nondep_tvs') }
+       -- We should never quantify over coercion variables; check this
+       ; let co_vars = filter isCoVar final_qtvs
+       ; MASSERT2( null co_vars, ppr co_vars )
+
+       ; return final_qtvs }
   where
     -- zonk_quant returns a tyvar if it should be quantified over;
     -- otherwise, it returns Nothing. The latter case happens for
     --    * Kind variables, with -XNoPolyKinds: don't quantify over these
     --    * RuntimeRep variables: we never quantify over these
     zonk_quant default_kind tkv
+      | not (isTyVar tkv)
+      = return Nothing   -- this can happen for a covar that's associated with
+                         -- a coercion hole. Test case: typecheck/should_compile/T2494
+
       | not (isTcTyVar tkv)
       = return (Just tkv)  -- For associated types, we have the class variables
                            -- in scope, and they are TyVars not TcTyVars
@@ -1024,24 +1065,28 @@ defaultTyVar default_kind tv
   | not (isMetaTyVar tv)
   = return False
 
-  | isRuntimeRepVar tv && not_sig_tv  -- We never quantify over a RuntimeRep var
+  | isSigTyVar tv
+    -- Do not default SigTvs. Doing so would violate the invariants
+    -- on SigTvs; see Note [Signature skolems] in TcType.
+    -- Trac #13343 is an example; #14555 is another
+    -- See Note [Kind generalisation and SigTvs]
+  = return False
+
+
+  | isRuntimeRepVar tv  -- Do not quantify over a RuntimeRep var
+                        -- unless it is a SigTv, handled earlier
   = do { traceTc "Defaulting a RuntimeRep var to LiftedRep" (ppr tv)
        ; writeMetaTyVar tv liftedRepTy
        ; return True }
 
-  | default_kind && not_sig_tv        -- -XNoPolyKinds and this is a kind var
-  = do { default_kind_var tv          -- so default it to * if possible
+  | default_kind                 -- -XNoPolyKinds and this is a kind var
+  = do { default_kind_var tv     -- so default it to * if possible
        ; return True }
 
   | otherwise
   = return False
 
   where
-    -- Do not default SigTvs. Doing so would violate the invariants
-    -- on SigTvs; see Note [Signature skolems] in TcType.
-    -- Trac #13343 is an example
-    not_sig_tv = not (isSigTyVar tv)
-
     default_kind_var :: TyVar -> TcM ()
        -- defaultKindVar is used exclusively with -XNoPolyKinds
        -- See Note [Defaulting with -XNoPolyKinds]
@@ -1464,6 +1509,9 @@ zonkId id
   = do { ty' <- zonkTcType (idType id)
        ; return (Id.setIdType id ty') }
 
+zonkCoVar :: CoVar -> TcM CoVar
+zonkCoVar = zonkId
+
 -- | A suitable TyCoMapper for zonking a type inside the knot, and
 -- before all metavars are filled in.
 zonkTcTypeMapper :: TyCoMapper () TcM
@@ -1474,16 +1522,14 @@ zonkTcTypeMapper = TyCoMapper
   , tcm_hole  = hole
   , tcm_tybinder = \_env tv _vis -> ((), ) <$> zonkTcTyCoVarBndr tv }
   where
-    hole :: () -> CoercionHole -> Role -> Type -> Type
-         -> TcM Coercion
-    hole _ h r t1 t2
-      = do { contents <- unpackCoercionHole_maybe h
+    hole :: () -> CoercionHole -> TcM Coercion
+    hole _ hole@(CoercionHole { ch_ref = ref, ch_co_var = cv })
+      = do { contents <- readTcRef ref
            ; case contents of
-               Just co -> do { co <- zonkCo co
-                             ; checkCoercionHole co h r t1 t2 }
-               Nothing -> do { t1 <- zonkTcType t1
-                             ; t2 <- zonkTcType t2
-                             ; return $ mkHoleCo h r t1 t2 } }
+               Just co -> do { co' <- zonkCo co
+                             ; checkCoercionHole cv co' }
+               Nothing -> do { cv' <- zonkCoVar cv
+                             ; return $ HoleCo (hole { ch_co_var = cv' }) } }
 
 
 -- For unbound, mutable tyvars, zonkType uses the function given to it
@@ -1497,11 +1543,17 @@ zonkCo :: Coercion -> TcM Coercion
 zonkCo = mapCoercion zonkTcTypeMapper ()
 
 zonkTcTyCoVarBndr :: TcTyCoVar -> TcM TcTyCoVar
--- A tyvar binder is never a unification variable (MetaTv),
--- rather it is always a skolems.  BUT it may have a kind
+-- A tyvar binder is never a unification variable (TauTv),
+-- rather it is always a skolem. It *might* be a SigTv.
+-- (Because non-CUSK type declarations use SigTvs.)
+-- Regardless, it may have a kind
 -- that has not yet been zonked, and may include kind
 -- unification variables.
 zonkTcTyCoVarBndr tyvar
+  | isSigTyVar tyvar
+  = tcGetTyVar "zonkTcTyCoVarBndr SigTv" <$> zonkTcTyVar tyvar
+
+  | otherwise
     -- can't use isCoVar, because it looks at a TyCon. Argh.
   = ASSERT2( isImmutableTyVar tyvar || (not $ isTyVar tyvar), pprTyVar tyvar )
     updateTyVarKindM zonkTcType tyvar
@@ -1532,10 +1584,21 @@ zonkTcTyVar tv
 
 -- Variant that assumes that any result of zonking is still a TyVar.
 -- Should be used only on skolems and SigTvs
-zonkTcTyVarToTyVar :: TcTyVar -> TcM TcTyVar
+zonkTcTyVarToTyVar :: HasDebugCallStack => TcTyVar -> TcM TcTyVar
 zonkTcTyVarToTyVar tv
   = do { ty <- zonkTcTyVar tv
-       ; return (tcGetTyVar "zonkTcTyVarToVar" ty) }
+       ; let tv' = case tcGetTyVar_maybe ty of
+                     Just tv' -> tv'
+                     Nothing  -> pprPanic "zonkTcTyVarToTyVar"
+                                          (ppr tv $$ ppr ty)
+       ; return tv' }
+
+zonkSigTyVarPairs :: [(Name,TcTyVar)] -> TcM [(Name,TcTyVar)]
+zonkSigTyVarPairs prs
+  = mapM do_one prs
+  where
+    do_one (nm, tv) = do { tv' <- zonkTcTyVarToTyVar tv
+                         ; return (nm, tv') }
 
 {-
 %************************************************************************
@@ -1684,8 +1747,8 @@ formatLevPolyErr :: Type  -- levity-polymorphic type
                  -> SDoc
 formatLevPolyErr ty
   = hang (text "A levity-polymorphic type is not allowed here:")
-       2 (vcat [ text "Type:" <+> ppr tidy_ty
-               , text "Kind:" <+> ppr tidy_ki ])
+       2 (vcat [ text "Type:" <+> pprWithTYPE tidy_ty
+               , text "Kind:" <+> pprWithTYPE tidy_ki ])
   where
     (tidy_env, tidy_ty) = tidyOpenType emptyTidyEnv ty
     tidy_ki             = tidyType tidy_env (typeKind ty)

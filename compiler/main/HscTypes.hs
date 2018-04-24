@@ -857,7 +857,10 @@ data ModIface
         mi_iface_hash :: !Fingerprint,        -- ^ Hash of the whole interface
         mi_mod_hash   :: !Fingerprint,        -- ^ Hash of the ABI only
         mi_flag_hash  :: !Fingerprint,        -- ^ Hash of the important flags
-                                              -- used when compiling this module
+                                              -- used when compiling the module,
+                                              -- excluding optimisation flags
+        mi_opt_hash   :: !Fingerprint,        -- ^ Hash of optimisation flags
+        mi_hpc_hash   :: !Fingerprint,        -- ^ Hash of hpc flags
 
         mi_orphan     :: !WhetherHasOrphans,  -- ^ Whether this module has orphans
         mi_finsts     :: !WhetherHasFamInst,
@@ -1018,6 +1021,8 @@ instance Binary ModIface where
                  mi_iface_hash= iface_hash,
                  mi_mod_hash  = mod_hash,
                  mi_flag_hash = flag_hash,
+                 mi_opt_hash  = opt_hash,
+                 mi_hpc_hash  = hpc_hash,
                  mi_orphan    = orphan,
                  mi_finsts    = hasFamInsts,
                  mi_deps      = deps,
@@ -1044,6 +1049,8 @@ instance Binary ModIface where
         put_ bh iface_hash
         put_ bh mod_hash
         put_ bh flag_hash
+        put_ bh opt_hash
+        put_ bh hpc_hash
         put_ bh orphan
         put_ bh hasFamInsts
         lazyPut bh deps
@@ -1072,6 +1079,8 @@ instance Binary ModIface where
         iface_hash  <- get bh
         mod_hash    <- get bh
         flag_hash   <- get bh
+        opt_hash    <- get bh
+        hpc_hash    <- get bh
         orphan      <- get bh
         hasFamInsts <- get bh
         deps        <- lazyGet bh
@@ -1099,6 +1108,8 @@ instance Binary ModIface where
                  mi_iface_hash  = iface_hash,
                  mi_mod_hash    = mod_hash,
                  mi_flag_hash   = flag_hash,
+                 mi_opt_hash    = opt_hash,
+                 mi_hpc_hash    = hpc_hash,
                  mi_orphan      = orphan,
                  mi_finsts      = hasFamInsts,
                  mi_deps        = deps,
@@ -1136,6 +1147,8 @@ emptyModIface mod
                mi_iface_hash  = fingerprint0,
                mi_mod_hash    = fingerprint0,
                mi_flag_hash   = fingerprint0,
+               mi_opt_hash    = fingerprint0,
+               mi_hpc_hash    = fingerprint0,
                mi_orphan      = False,
                mi_finsts      = False,
                mi_hsc_src     = HsSrcFile,
@@ -1265,7 +1278,7 @@ data ModGuts
                                          -- See Note [Overall plumbing for rules] in Rules.hs
         mg_binds     :: !CoreProgram,    -- ^ Bindings for this module
         mg_foreign   :: !ForeignStubs,   -- ^ Foreign exports declared in this module
-        mg_foreign_files :: ![(ForeignSrcLang, String)],
+        mg_foreign_files :: ![(ForeignSrcLang, FilePath)],
         -- ^ Files to be compiled with the C compiler
         mg_warns     :: !Warnings,       -- ^ Warnings declared in the module
         mg_anns      :: [Annotation],    -- ^ Annotations declared in this module
@@ -1322,11 +1335,11 @@ data CgGuts
                 -- ^ The tidied main bindings, including
                 -- previously-implicit bindings for record and class
                 -- selectors, and data constructor wrappers.  But *not*
-                -- data constructor workers; reason: we we regard them
+                -- data constructor workers; reason: we regard them
                 -- as part of the code-gen of tycons
 
         cg_foreign   :: !ForeignStubs,   -- ^ Foreign export stubs
-        cg_foreign_files :: ![(ForeignSrcLang, String)],
+        cg_foreign_files :: ![(ForeignSrcLang, FilePath)],
         cg_dep_pkgs  :: ![InstalledUnitId], -- ^ Dependent packages, used to
                                             -- generate #includes for C code gen
         cg_hpc_info  :: !HpcInfo,           -- ^ Program coverage tick box information
@@ -1628,7 +1641,7 @@ extendInteractiveContext ictxt new_tythings new_cls_insts new_fam_insts defaults
   = ictxt { ic_mod_index  = ic_mod_index ictxt + 1
                             -- Always bump this; even instances should create
                             -- a new mod_index (Trac #9426)
-          , ic_tythings   = new_tythings ++ ic_tythings ictxt
+          , ic_tythings   = new_tythings ++ old_tythings
           , ic_rn_gbl_env = ic_rn_gbl_env ictxt `icExtendGblRdrEnv` new_tythings
           , ic_instances  = ( new_cls_insts ++ old_cls_insts
                             , new_fam_insts ++ fam_insts )
@@ -1638,6 +1651,8 @@ extendInteractiveContext ictxt new_tythings new_cls_insts new_fam_insts defaults
           , ic_fix_env    = fix_env  -- See Note [Fixity declarations in GHCi]
           }
   where
+    new_ids = [id | AnId id <- new_tythings]
+    old_tythings = filterOut (shadowed_by new_ids) (ic_tythings ictxt)
 
     -- Discard old instances that have been fully overridden
     -- See Note [Override identical instances in GHCi]
@@ -1649,10 +1664,17 @@ extendInteractiveContextWithIds :: InteractiveContext -> [Id] -> InteractiveCont
 extendInteractiveContextWithIds ictxt new_ids
   | null new_ids = ictxt
   | otherwise    = ictxt { ic_mod_index  = ic_mod_index ictxt + 1
-                         , ic_tythings   = new_tythings ++ ic_tythings ictxt
+                         , ic_tythings   = new_tythings ++ old_tythings
                          , ic_rn_gbl_env = ic_rn_gbl_env ictxt `icExtendGblRdrEnv` new_tythings }
   where
     new_tythings = map AnId new_ids
+    old_tythings = filterOut (shadowed_by new_ids) (ic_tythings ictxt)
+
+shadowed_by :: [Id] -> TyThing -> Bool
+shadowed_by ids = shadowed
+  where
+    shadowed id = getOccName id `elemOccSet` new_occs
+    new_occs = mkOccSet (map getOccName ids)
 
 setInteractivePackage :: HscEnv -> HscEnv
 -- Set the 'thisPackage' DynFlag to 'interactive'
@@ -1698,8 +1720,13 @@ substInteractiveContext ictxt@InteractiveContext{ ic_tythings = tts } subst
   | isEmptyTCvSubst subst = ictxt
   | otherwise             = ictxt { ic_tythings = map subst_ty tts }
   where
-    subst_ty (AnId id) = AnId $ id `setIdType` substTyUnchecked subst (idType id)
-    subst_ty tt        = tt
+    subst_ty (AnId id)
+      = AnId $ id `setIdType` substTyAddInScope subst (idType id)
+      -- Variables in the interactive context *can* mention free type variables
+      -- because of the runtime debugger. Otherwise you'd expect all
+      -- variables bound in the interactive context to be closed.
+    subst_ty tt
+      = tt
 
 instance Outputable InteractiveImport where
   ppr (IIModule m) = char '*' <> ppr m

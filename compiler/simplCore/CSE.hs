@@ -17,9 +17,9 @@ import Var              ( Var )
 import VarEnv           ( elemInScopeSet, mkInScopeSet )
 import Id               ( Id, idType, idInlineActivation, isDeadBinder
                         , zapIdOccInfo, zapIdUsageInfo, idInlinePragma
-                        , isJoinId )
+                        , isJoinId, isJoinId_maybe )
 import CoreUtils        ( mkAltExpr, eqExpr
-                        , exprIsLiteralString
+                        , exprIsTickedString
                         , stripTicksE, stripTicksT, mkTicks )
 import CoreFVs          ( exprFreeVars )
 import Type             ( tyConAppArgs )
@@ -274,7 +274,28 @@ compiling ppHtml in Haddock.Backends.Xhtml).
 
 We could try and be careful by tracking which join points are still valid at
 each subexpression, but since join points aren't allocated or shared, there's
-less to gain by trying to CSE them.
+less to gain by trying to CSE them. (#13219)
+
+Note [Look inside join-point binders]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Another way how CSE for joint points is tricky is
+
+  let join foo x = (x, 42)
+      join bar x = (x, 42)
+  in … jump foo 1 … jump bar 2 …
+
+naively, CSE would turn this into
+
+  let join foo x = (x, 42)
+      join bar = foo
+  in … jump foo 1 … jump bar 2 …
+
+but now bar is a join point that claims arity one, but its right-hand side
+is not a lambda, breaking the join-point invariant (this was #15002).
+
+So `cse_bind` must zoom past the lambdas of a join point (using
+`collectNBinders`) and resume searching for CSE opportunities only in
+the body of the join point.
 
 Note [CSE for recursive bindings]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -349,15 +370,22 @@ cseBind toplevel env (Rec pairs)
 -- which are equal to @out_rhs@.
 cse_bind :: TopLevelFlag -> CSEnv -> (InId, InExpr) -> OutId -> (CSEnv, (OutId, OutExpr))
 cse_bind toplevel env (in_id, in_rhs) out_id
-  | isTopLevel toplevel, exprIsLiteralString in_rhs
+  | isTopLevel toplevel, exprIsTickedString in_rhs
       -- See Note [Take care with literal strings]
-  = (env', (out_id, in_rhs))
+  = (env', (out_id', in_rhs))
+
+  | Just arity <- isJoinId_maybe in_id
+      -- See Note [Look inside join-point binders]
+  = let (params, in_body) = collectNBinders arity in_rhs
+        (env', params') = addBinders env params
+        out_body = tryForCSE env' in_body
+    in (env, (out_id, mkLams params' out_body))
 
   | otherwise
   = (env', (out_id', out_rhs))
   where
-    out_rhs         = tryForCSE env in_rhs
     (env', out_id') = addBinding env in_id out_id out_rhs
+    out_rhs         = tryForCSE env in_rhs
 
 addBinding :: CSEnv                      -- Includes InId->OutId cloning
            -> InVar                      -- Could be a let-bound type
@@ -392,6 +420,8 @@ addBinding env in_id out_id rhs'
                    Var {} -> True
                    _      -> False
 
+-- | Given a binder `let x = e`, this function
+-- determines whether we should add `e -> x` to the cs_map
 noCSE :: InId -> Bool
 noCSE id =  not (isAlwaysActive (idInlineActivation id)) &&
             not (noUserInlineSpec (inlinePragmaSpec (idInlinePragma id)))
@@ -544,9 +574,9 @@ to transform
    W y z   -> e2
 
 In the simplifier we use cheapEqExpr, because it is called a lot.
-But here in CSE we use the full eqExpr.  After all, two alterantives usually
+But here in CSE we use the full eqExpr.  After all, two alternatives usually
 differ near the root, so it probably isn't expensive to compare the full
-alternative.  It seems like the the same kind of thing that CSE is supposed
+alternative.  It seems like the same kind of thing that CSE is supposed
 to be doing, which is why I put it here.
 
 I acutally saw some examples in the wild, where some inlining made e1 too

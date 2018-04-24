@@ -99,6 +99,10 @@ $white_no_nl+           ;
   "&&"                  { kw CmmT_BoolAnd }
   "||"                  { kw CmmT_BoolOr }
 
+  "True"                { kw CmmT_True  }
+  "False"               { kw CmmT_False }
+  "likely"              { kw CmmT_likely}
+
   P@decimal             { global_regN (\n -> VanillaReg n VGcPtr) }
   R@decimal             { global_regN (\n -> VanillaReg n VNonGcPtr) }
   F@decimal             { global_regN FloatReg }
@@ -181,6 +185,9 @@ data CmmToken
   | CmmT_Int       Integer
   | CmmT_Float     Rational
   | CmmT_EOF
+  | CmmT_False
+  | CmmT_True
+  | CmmT_likely
   deriving (Show)
 
 -- -----------------------------------------------------------------------------
@@ -268,7 +275,10 @@ reservedWordsFM = listToUFM $
         ( "b512",               CmmT_bits512 ),
         ( "f32",                CmmT_float32 ),
         ( "f64",                CmmT_float64 ),
-        ( "gcptr",              CmmT_gcptr )
+        ( "gcptr",              CmmT_gcptr ),
+        ( "likely",             CmmT_likely),
+        ( "True",               CmmT_True  ),
+        ( "False",              CmmT_False )
         ]
 
 tok_decimal span buf len

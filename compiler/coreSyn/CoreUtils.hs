@@ -29,7 +29,8 @@ module CoreUtils (
         exprIsHNF, exprOkForSpeculation, exprOkForSideEffects, exprIsWorkFree,
         exprIsBig, exprIsConLike,
         rhsIsStatic, isCheapApp, isExpandableApp,
-        exprIsLiteralString, exprIsTopLevelBindable,
+        exprIsTickedString, exprIsTickedString_maybe,
+        exprIsTopLevelBindable,
         altsAreExhaustive,
 
         -- * Equality
@@ -90,10 +91,13 @@ import BasicTypes       ( Arity, isConLike )
 import Platform
 import Util
 import Pair
+import Data.ByteString     ( ByteString )
 import Data.Function       ( on )
 import Data.List
 import Data.Ord            ( comparing )
 import OrdList
+import qualified Data.Set as Set
+import UniqSet
 
 {-
 ************************************************************************
@@ -182,7 +186,7 @@ isExprLevPoly = go
 Note [Type bindings]
 ~~~~~~~~~~~~~~~~~~~~
 Core does allow type bindings, although such bindings are
-not much used, except in the output of the desuguarer.
+not much used, except in the output of the desugarer.
 Example:
      let a = Int in (\x:a. x)
 Given this, exprType must be careful to substitute 'a' in the
@@ -253,7 +257,7 @@ applyTypeToArgs e op_ty args
 
 -- | Wrap the given expression in the coercion safely, dropping
 -- identity coercions and coalescing nested coercions
-mkCast :: CoreExpr -> Coercion -> CoreExpr
+mkCast :: CoreExpr -> CoercionR -> CoreExpr
 mkCast e co
   | ASSERT2( coercionRole co == Representational
            , text "coercion" <+> ppr co <+> ptext (sLit "passed to mkCast")
@@ -610,8 +614,6 @@ filterAlts :: TyCon                -- ^ Type constructor of scrutinee's type (us
              --  2. The new alternatives, trimmed by
              --        a) remove imposs_cons
              --        b) remove constructors which can't match because of GADTs
-             --      and with the DEFAULT expanded to a DataAlt if there is exactly
-             --      remaining constructor that can match
              --
              -- NB: the final list of alternatives may be empty:
              -- This is a tricky corner case.  If the data type has no constructors,
@@ -629,22 +631,25 @@ filterAlts _tycon inst_tys imposs_cons alts
 
     trimmed_alts = filterOut (impossible_alt inst_tys) alts_wo_default
 
-    imposs_deflt_cons = nub (imposs_cons ++ alt_cons)
+    imposs_cons_set = Set.fromList imposs_cons
+    imposs_deflt_cons =
+      imposs_cons ++ filterOut (`Set.member` imposs_cons_set) alt_cons
          -- "imposs_deflt_cons" are handled
          --   EITHER by the context,
          --   OR by a non-DEFAULT branch in this case expression.
 
     impossible_alt :: [Type] -> (AltCon, a, b) -> Bool
-    impossible_alt _ (con, _, _) | con `elem` imposs_cons = True
+    impossible_alt _ (con, _, _) | con `Set.member` imposs_cons_set = True
     impossible_alt inst_tys (DataAlt con, _, _) = dataConCannotMatch inst_tys con
     impossible_alt _  _                         = False
 
-refineDefaultAlt :: [Unique] -> TyCon -> [Type]
-                 -> [AltCon]  -- Constructors that cannot match the DEFAULT (if any)
+-- | Refine the default alternative to a 'DataAlt', if there is a unique way to do so.
+refineDefaultAlt :: [Unique]          -- ^ Uniques for constructing new binders
+                 -> TyCon             -- ^ Type constructor of scrutinee's type
+                 -> [Type]            -- ^ Type arguments of scrutinee's type
+                 -> [AltCon]          -- ^ Constructors that cannot match the DEFAULT (if any)
                  -> [CoreAlt]
-                 -> (Bool, [CoreAlt])
--- Refine the default alternative to a DataAlt,
--- if there is a unique way to do so
+                 -> (Bool, [CoreAlt]) -- ^ 'True', if a default alt was replaced with a 'DataAlt'
 refineDefaultAlt us tycon tys imposs_deflt_cons all_alts
   | (DEFAULT,_,rhs) : rest_alts <- all_alts
   , isAlgTyCon tycon            -- It's a data type, tuple, or unboxed tuples.
@@ -652,8 +657,11 @@ refineDefaultAlt us tycon tys imposs_deflt_cons all_alts
                                 --      case x of { DEFAULT -> e }
                                 -- and we don't want to fill in a default for them!
   , Just all_cons <- tyConDataCons_maybe tycon
-  , let imposs_data_cons = [con | DataAlt con <- imposs_deflt_cons]   -- We now know it's a data type
-        impossible con   = con `elem` imposs_data_cons || dataConCannotMatch tys con
+  , let imposs_data_cons = mkUniqSet [con | DataAlt con <- imposs_deflt_cons]
+                             -- We now know it's a data type, so we can use
+                             -- UniqSet rather than Set (more efficient)
+        impossible con   = con `elementOfUniqSet` imposs_data_cons
+                             || dataConCannotMatch tys con
   = case filterOut impossible all_cons of
        -- Eliminate the default alternative
        -- altogether if it can't match:
@@ -1076,29 +1084,6 @@ Note that exprIsHNF does not imply exprIsCheap.  Eg
 This responds True to exprIsHNF (you can discard a seq), but
 False to exprIsCheap.
 
-Note [exprIsExpandable]
-~~~~~~~~~~~~~~~~~~~~~~~
-An expression is "expandable" if we are willing to dupicate it, if doing
-so might make a RULE or case-of-constructor fire.  Mainly this means
-data-constructor applications, but it's a bit more generous than exprIsCheap
-because it is true of "CONLIKE" Ids: see Note [CONLIKE pragma] in BasicTypes.
-
-It is used to set the uf_expandable field of an Unfolding, and that
-in turn is used
-  * In RULE matching
-  * In exprIsConApp_maybe, exprIsLiteral_maybe, exprIsLambda_maybe
-
-But take care: exprIsExpandable should /not/ be true of primops.  I
-found this in test T5623a:
-    let q = /\a. Ptr a (a +# b)
-    in case q @ Float of Ptr v -> ...q...
-
-q's inlining should not be expandable, else exprIsConApp_maybe will
-say that (q @ Float) expands to (Ptr a (a +# b)), and that will
-duplicate the (a +# b) primop, which we should not do lightly.
-(It's quite hard to trigger this bug, but T13155 does so for GHC 8.0.)
-
-
 Note [Arguments and let-bindings exprIsCheapX]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 What predicate should we apply to the argument of an application, or the
@@ -1124,16 +1109,12 @@ in this (which it previously was):
 -}
 
 --------------------
-exprIsCheap :: CoreExpr -> Bool
-exprIsCheap = exprIsCheapX isCheapApp
-
-exprIsExpandable :: CoreExpr -> Bool -- See Note [exprIsExpandable]
-exprIsExpandable = exprIsCheapX isExpandableApp
-
 exprIsWorkFree :: CoreExpr -> Bool   -- See Note [exprIsWorkFree]
 exprIsWorkFree = exprIsCheapX isWorkFreeApp
 
---------------------
+exprIsCheap :: CoreExpr -> Bool
+exprIsCheap = exprIsCheapX isCheapApp
+
 exprIsCheapX :: CheapAppFun -> CoreExpr -> Bool
 exprIsCheapX ok_app e
   = ok e
@@ -1159,6 +1140,75 @@ exprIsCheapX ok_app e
 
       -- Case: see Note [Case expressions are work-free]
       -- App, Let: see Note [Arguments and let-bindings exprIsCheapX]
+
+
+{- Note [exprIsExpandable]
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+An expression is "expandable" if we are willing to duplicate it, if doing
+so might make a RULE or case-of-constructor fire.  Consider
+   let x = (a,b)
+       y = build g
+   in ....(case x of (p,q) -> rhs)....(foldr k z y)....
+
+We don't inline 'x' or 'y' (see Note [Lone variables] in CoreUnfold),
+but we do want
+
+ * the case-expression to simplify
+   (via exprIsConApp_maybe, exprIsLiteral_maybe)
+
+ * the foldr/build RULE to fire
+   (by expanding the unfolding during rule matching)
+
+So we classify the unfolding of a let-binding as "expandable" (via the
+uf_expandable field) if we want to do this kind of on-the-fly
+expansion.  Specifically:
+
+* True of constructor applications (K a b)
+
+* True of applications of a "CONLIKE" Id; see Note [CONLIKE pragma] in BasicTypes.
+  (NB: exprIsCheap might not be true of this)
+
+* False of case-expressions.  If we have
+    let x = case ... in ...(case x of ...)...
+  we won't simplify.  We have to inline x.  See Trac #14688.
+
+* False of let-expressions (same reason); and in any case we
+  float lets out of an RHS if doing so will reveal an expandable
+  application (see SimplEnv.doFloatFromRhs).
+
+* Take care: exprIsExpandable should /not/ be true of primops.  I
+  found this in test T5623a:
+    let q = /\a. Ptr a (a +# b)
+    in case q @ Float of Ptr v -> ...q...
+
+  q's inlining should not be expandable, else exprIsConApp_maybe will
+  say that (q @ Float) expands to (Ptr a (a +# b)), and that will
+  duplicate the (a +# b) primop, which we should not do lightly.
+  (It's quite hard to trigger this bug, but T13155 does so for GHC 8.0.)
+-}
+
+-------------------------------------
+exprIsExpandable :: CoreExpr -> Bool
+-- See Note [exprIsExpandable]
+exprIsExpandable e
+  = ok e
+  where
+    ok e = go 0 e
+
+    -- n is the number of value arguments
+    go n (Var v)                      = isExpandableApp v n
+    go _ (Lit {})                     = True
+    go _ (Type {})                    = True
+    go _ (Coercion {})                = True
+    go n (Cast e _)                   = go n e
+    go n (Tick t e) | tickishCounts t = False
+                    | otherwise       = go n e
+    go n (Lam x e)  | isRuntimeVar x  = n==0 || go (n-1) e
+                    | otherwise       = go n e
+    go n (App f e)  | isRuntimeArg e  = go (n+1) f && ok e
+                    | otherwise       = go n f
+    go _ (Case {})                    = False
+    go _ (Let {})                     = False
 
 
 -------------------------------------
@@ -1398,8 +1448,11 @@ app_ok primop_ok fun args
               -- Often there is a literal divisor, and this
               -- can get rid of a thunk in an inner loop
 
+        | SeqOp <- op    -- See Note [seq# and expr_ok]
+        -> all (expr_ok primop_ok) args
+
         | otherwise
-        -> primop_ok op     -- Check the primop itself
+        -> primop_ok op  -- Check the primop itself
         && and (zipWith arg_ok arg_tys args)  -- Check the arguments
 
       _other -> isUnliftedType (idType fun)          -- c.f. the Var case of exprIsHNF
@@ -1500,7 +1553,7 @@ But we restrict it sharply:
          _ ->  ...v...v....
   Should v be considered ok-for-speculation?  Its scrutinee may be
   evaluated, but the alternatives are incomplete so we should not
-  evalutate it strictly.
+  evaluate it strictly.
 
   Now, all this is for lifted types, but it'd be the same for any
   finite unlifted type. We don't have many of them, but we might
@@ -1538,8 +1591,8 @@ evaluate them.  Indeed, in general primops are, well, primitive
 and do not perform evaluation.
 
 There is one primop, dataToTag#, which does /require/ a lifted
-argument to be evaluted.  To ensure this, CorePrep adds an
-eval if it can't see the the argument is definitely evaluated
+argument to be evaluated.  To ensure this, CorePrep adds an
+eval if it can't see the argument is definitely evaluated
 (see [dataToTag magic] in CorePrep).
 
 We make no attempt to guarantee that dataToTag#'s argument is
@@ -1556,6 +1609,25 @@ See also Note [dataToTag#] in primops.txt.pp.
 
 Bottom line:
   * in exprOkForSpeculation we simply ignore all lifted arguments.
+  * except see Note [seq# and expr_ok] for an exception
+
+
+Note [seq# and expr_ok]
+~~~~~~~~~~~~~~~~~~~~~~~
+Recall that
+   seq# :: forall a s . a -> State# s -> (# State# s, a #)
+must always evaluate its first argument.  So it's really a
+counter-example to Note [Primops with lifted arguments]. In
+the case of seq# we must check the argument to seq#.  Remember
+item (d) of the specification of exprOkForSpeculation:
+
+  -- Precisely, it returns @True@ iff:
+  --  a) The expression guarantees to terminate,
+         ...
+  --  d) without throwing a Haskell exception
+
+The lack of this special case caused Trac #5129 to go bad again.
+See comment:24 and following
 
 
 ************************************************************************
@@ -1674,13 +1746,28 @@ don't want to discard a seq on it.
 exprIsTopLevelBindable :: CoreExpr -> Type -> Bool
 -- See Note [CoreSyn top-level string literals]
 -- Precondition: exprType expr = ty
+-- Top-level literal strings can't even be wrapped in ticks
+--   see Note [CoreSyn top-level string literals] in CoreSyn
 exprIsTopLevelBindable expr ty
-  = exprIsLiteralString expr
-  || not (isUnliftedType ty)
+  = not (isUnliftedType ty)
+  || exprIsTickedString expr
 
-exprIsLiteralString :: CoreExpr -> Bool
-exprIsLiteralString (Lit (MachStr _)) = True
-exprIsLiteralString _ = False
+-- | Check if the expression is zero or more Ticks wrapped around a literal
+-- string.
+exprIsTickedString :: CoreExpr -> Bool
+exprIsTickedString = isJust . exprIsTickedString_maybe
+
+-- | Extract a literal string from an expression that is zero or more Ticks
+-- wrapped around a literal string. Returns Nothing if the expression has a
+-- different shape.
+-- Used to "look through" Ticks in places that need to handle literal strings.
+exprIsTickedString_maybe :: CoreExpr -> Maybe ByteString
+exprIsTickedString_maybe (Lit (MachStr bs)) = Just bs
+exprIsTickedString_maybe (Tick t e)
+  -- we don't tick literals with CostCentre ticks, compare to mkTick
+  | tickishPlace t == PlaceCostCentre = Nothing
+  | otherwise = exprIsTickedString_maybe e
+exprIsTickedString_maybe _ = Nothing
 
 {-
 ************************************************************************

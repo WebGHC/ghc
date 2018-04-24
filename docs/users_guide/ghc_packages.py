@@ -8,13 +8,13 @@ from utils import build_table_from_list
 def read_cabal_file(pkg_path):
     import re
     cabal_file = open(pkg_path, 'r').read()
-    pkg_name = re.search(r'[nN]ame:\s*([-a-zA-Z0-9]+)', cabal_file)
+    pkg_name = re.search(r'^[nN]ame\s*:\s*([-a-zA-Z0-9]+)', cabal_file, re.MULTILINE)
     if pkg_name is not None:
         pkg_name = pkg_name.group(1)
     else:
         raise RuntimeError("Failed to parse `Name:` field from %s" % pkg_path)
 
-    pkg_version = re.search(r'[vV]ersion:\s*(\d+(\.\d+)*)', cabal_file)
+    pkg_version = re.search(r'^[vV]ersion\s*:\s*(\d+(\.\d+)*)', cabal_file, re.MULTILINE)
     if pkg_version is not None:
         pkg_version = pkg_version.group(1)
     else:
@@ -49,12 +49,13 @@ class PackageListDirective(Directive):
 
         for (pkg_path, reason) in sorted(packages):
             (pkg_name, pkg_version) = read_cabal_file(pkg_path)
-            cells = [ nodes.inline(text=pkg_name),
+            cells = [ nodes.paragraph(text=pkg_name),
                       nodes.inline(text=pkg_version),
                       reason ]
             package_list.append(cells)
 
         table = build_table_from_list(package_list, [20, 20, 40])
+        table['classes'].append('longtable')
         return [table]
 
 ### Initialization

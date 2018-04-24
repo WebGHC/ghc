@@ -48,7 +48,7 @@ import TcType
 import Type
 import Coercion
 import TcEvidence
-import Name ( isSystemName )
+import Name( isSystemName )
 import Inst
 import TyCon
 import TysWiredIn
@@ -565,7 +565,13 @@ tcSubTypeET orig ctxt (Check ty_actual) ty_expected
 
 tcSubTypeET _ _ (Infer inf_res) ty_expected
   = ASSERT2( not (ir_inst inf_res), ppr inf_res $$ ppr ty_expected )
-    do { co <- fillInferResult ty_expected inf_res
+      -- An (Infer inf_res) ExpSigmaType passed into tcSubTypeET never
+      -- has the ir_inst field set.  Reason: in patterns (which is what
+      -- tcSubTypeET is used for) do not agressively instantiate
+    do { co <- fill_infer_result ty_expected inf_res
+               -- Since ir_inst is false, we can skip fillInferResult
+               -- and go straight to fill_infer_result
+
        ; return (mkWpCastN (mkTcSymCo co)) }
 
 ------------------------
@@ -638,7 +644,7 @@ tcSubTypeDS_NC_O :: CtOrigin   -- origin used for instantiation only
 -- ty_expected is deeply skolemised
 tcSubTypeDS_NC_O inst_orig ctxt m_thing ty_actual ty_expected
   = case ty_expected of
-      Infer inf_res -> fillInferResult_Inst inst_orig ty_actual inf_res
+      Infer inf_res -> fillInferResult inst_orig ty_actual inf_res
       Check ty      -> tc_sub_type_ds eq_orig inst_orig ctxt ty_actual ty
          where
            eq_orig = TypeEqOrigin { uo_actual = ty_actual, uo_expected = ty
@@ -852,24 +858,24 @@ tcInfer instantiate tc_check
        ; res_ty <- readExpType res_ty
        ; return (result, res_ty) }
 
-fillInferResult_Inst :: CtOrigin -> TcType -> InferResult -> TcM HsWrapper
--- If wrap = fillInferResult_Inst t1 t2
+fillInferResult :: CtOrigin -> TcType -> InferResult -> TcM HsWrapper
+-- If wrap = fillInferResult t1 t2
 --    => wrap :: t1 ~> t2
 -- See Note [Deep instantiation of InferResult]
-fillInferResult_Inst orig ty inf_res@(IR { ir_inst = instantiate_me })
+fillInferResult orig ty inf_res@(IR { ir_inst = instantiate_me })
   | instantiate_me
   = do { (wrap, rho) <- deeplyInstantiate orig ty
-       ; co <- fillInferResult rho inf_res
+       ; co <- fill_infer_result rho inf_res
        ; return (mkWpCastN co <.> wrap) }
 
   | otherwise
-  = do { co <- fillInferResult ty inf_res
+  = do { co <- fill_infer_result ty inf_res
        ; return (mkWpCastN co) }
 
-fillInferResult :: TcType -> InferResult -> TcM TcCoercionN
--- If wrap = fillInferResult t1 t2
+fill_infer_result :: TcType -> InferResult -> TcM TcCoercionN
+-- If wrap = fill_infer_result t1 t2
 --    => wrap :: t1 ~> t2
-fillInferResult orig_ty (IR { ir_uniq = u, ir_lvl = res_lvl
+fill_infer_result orig_ty (IR { ir_uniq = u, ir_lvl = res_lvl
                             , ir_ref = ref })
   = do { (ty_co, ty_to_fill_with) <- promoteTcType res_lvl orig_ty
 
@@ -886,7 +892,7 @@ fillInferResult orig_ty (IR { ir_uniq = u, ir_lvl = res_lvl
       = do { let ty_lvl = tcTypeLevel ty
            ; MASSERT2( not (ty_lvl `strictlyDeeperThan` res_lvl),
                        ppr u $$ ppr res_lvl $$ ppr ty_lvl $$
-                       ppr ty <+> ppr (typeKind ty) $$ ppr orig_ty )
+                       ppr ty <+> dcolon <+> ppr (typeKind ty) $$ ppr orig_ty )
            ; cts <- readTcRef ref
            ; case cts of
                Just already_there -> pprPanic "writeExpType"
@@ -910,7 +916,7 @@ has the ir_inst flag.
     f :: forall {a}. a -> forall b. Num b => b -> b -> b
   This is surely confusing for users.
 
-  And worse, the the monomorphism restriction won't properly. The MR is
+  And worse, the monomorphism restriction won't properly. The MR is
   dealt with in simplifyInfer, and simplifyInfer has no way of
   instantiating. This could perhaps be worked around, but it may be
   hard to know even when instantiation should happen.
@@ -1177,19 +1183,20 @@ buildImplicationFor tclvl skol_info skol_tvs given wanted
   = return (emptyBag, emptyTcEvBinds)
 
   | otherwise
-  = ASSERT2( all isSkolemTyVar skol_tvs, ppr skol_tvs )
+  = ASSERT2( all (isSkolemTyVar <||> isSigTyVar) skol_tvs, ppr skol_tvs )
+      -- Why allow SigTvs? Because implicitly declared kind variables in
+      -- non-CUSK type declarations are SigTvs, and we need to bring them
+      -- into scope as a skolem in an implication. This is OK, though,
+      -- because SigTvs will always remain tyvars, even after unification.
     do { ev_binds_var <- newTcEvBinds
        ; env <- getLclEnv
-       ; let implic = Implic { ic_tclvl = tclvl
-                             , ic_skols = skol_tvs
-                             , ic_no_eqs = False
-                             , ic_given = given
-                             , ic_wanted = wanted
-                             , ic_status  = IC_Unsolved
-                             , ic_binds = ev_binds_var
-                             , ic_env = env
-                             , ic_needed = emptyVarSet
-                             , ic_info = skol_info }
+       ; let implic = newImplication { ic_tclvl  = tclvl
+                                     , ic_skols  = skol_tvs
+                                     , ic_given  = given
+                                     , ic_wanted = wanted
+                                     , ic_binds  = ev_binds_var
+                                     , ic_env    = env
+                                     , ic_info   = skol_info }
 
        ; return (unitBag implic, TcEvBinds ev_binds_var) }
 
@@ -1312,6 +1319,14 @@ uType t_or_k origin orig_ty1 orig_ty2
       | tc1 == tc2
       = return $ mkReflCo Nominal ty1
 
+    go (CastTy t1 co1) t2
+      = do { co_tys <- go t1 t2
+           ; return (mkCoherenceLeftCo co_tys co1) }
+
+    go t1 (CastTy t2 co2)
+      = do { co_tys <- go t1 t2
+           ; return (mkCoherenceRightCo co_tys co2) }
+
         -- See Note [Expanding synonyms during unification]
         --
         -- Also NB that we recurse to 'go' so that we don't push a
@@ -1323,14 +1338,6 @@ uType t_or_k origin orig_ty1 orig_ty2
     go ty1 ty2
       | Just ty1' <- tcView ty1 = go ty1' ty2
       | Just ty2' <- tcView ty2 = go ty1  ty2'
-
-    go (CastTy t1 co1) t2
-      = do { co_tys <- go t1 t2
-           ; return (mkCoherenceLeftCo co_tys co1) }
-
-    go t1 (CastTy t2 co2)
-      = do { co_tys <- go t1 t2
-           ; return (mkCoherenceRightCo co_tys co2) }
 
         -- Functions (or predicate functions) just check the two parts
     go (FunTy fun1 arg1) (FunTy fun2 arg2)
@@ -1445,6 +1452,9 @@ We expand synonyms during unification, but:
    variables with un-expanded type synonym. This just makes it
    more likely that the inferred types will mention type synonyms
    understandable to the user
+
+ * Similarly, we expand *after* the CastTy case, just in case the
+   CastTy wraps a variable.
 
  * We expand *before* the TyConApp case.  For example, if we have
       type Phantom a = Int
@@ -1586,7 +1596,7 @@ swapOverTyVars tv1 tv2
       Nothing   -> False
       Just lvl2 | lvl2 `strictlyDeeperThan` lvl1 -> True
                 | lvl1 `strictlyDeeperThan` lvl2 -> False
-                | otherwise                      -> nicer_to_update tv2
+                | otherwise                      -> nicer_to_update_tv2
 
   -- So tv1 is not a meta tyvar
   -- If only one is a meta tyvar, put it on the left
@@ -1603,9 +1613,17 @@ swapOverTyVars tv1 tv2
   | otherwise = False
 
   where
-    nicer_to_update tv2
-      =  (isSigTyVar tv1                 && not (isSigTyVar tv2))
-      || (isSystemName (Var.varName tv2) && not (isSystemName (Var.varName tv1)))
+    tv1_name = Var.varName tv1
+    tv2_name = Var.varName tv2
+
+    nicer_to_update_tv2
+      | isSigTyVar tv1, not (isSigTyVar tv2)               = True
+      | isSystemName tv2_name, not (isSystemName tv1_name) = True
+--      | nameUnique tv1_name `ltUnique` nameUnique tv2_name = True
+--      -- See Note [Eliminate younger unification variables]
+--      (which also explains why it's commented out)
+      | otherwise = False
+
 
 -- @trySpontaneousSolve wi@ solves equalities where one side is a
 -- touchable unification variable.
@@ -1670,6 +1688,38 @@ left, giving
       [WD] fmv ~ alpha, [WD] F alpha ~ fmv, [WD] alpha ~ a
 
     Now we get alpha:=a, and everything works out
+
+Note [Avoid unnecessary swaps]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+If we swap without actually improving matters, we can get an infinite loop.
+Consider
+    work item:  a ~ b
+   inert item:  b ~ c
+We canonicalise the work-item to (a ~ c).  If we then swap it before
+adding to the inert set, we'll add (c ~ a), and therefore kick out the
+inert guy, so we get
+   new work item:  b ~ c
+   inert item:     c ~ a
+And now the cycle just repeats
+
+Note [Eliminate younger unification variables]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Given a choice of unifying
+     alpha := beta   or   beta := alpha
+we try, if possible, to elimiate the "younger" one, as determined
+by `ltUnique`.  Reason: the younger one is less likely to appear free in
+an existing inert constraint, and hence we are less likely to be forced
+into kicking out and rewriting inert constraints.
+
+This is a performance optimisation only.  It turns out to fix
+Trac #14723 all by itself, but clearly not reliably so!
+
+It's simple to implement (see nicer_to_update_tv2 in swapOverTyVars).
+But, to my surprise, it didn't seem to make any significant difference
+to the compiler's performance, so I didn't take it any further.  Still
+it seemed to too nice to discard altogether, so I'm leaving these
+notes.  SLPJ Jan 18.
+
 
 Note [Prevent unification with type families]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -2056,10 +2106,8 @@ occCheckExpand tv ty
     go env (TyVarTy tv')
       | tv == tv'                         = Nothing
       | Just tv'' <- lookupVarEnv env tv' = return (mkTyVarTy tv'')
-      | otherwise                         = do { k' <- go env (tyVarKind tv')
-                                               ; return (mkTyVarTy $
-                                                         setTyVarKind tv' k') }
-           -- See Note [Occurrence checking: look inside kinds]
+      | otherwise                         = do { tv'' <- go_var env tv'
+                                               ; return (mkTyVarTy tv'') }
 
     go _   ty@(LitTy {}) = return ty
     go env (AppTy ty1 ty2) = do { ty1' <- go env ty1
@@ -2094,6 +2142,12 @@ occCheckExpand tv ty
                                 ; return (mkCoercionTy co') }
 
     ------------------
+    go_var env v = do { k' <- go env (varType v)
+                      ; return (setVarType v k') }
+           -- Works for TyVar and CoVar
+           -- See Note [Occurrence checking: look inside kinds]
+
+    ------------------
     go_co env (Refl r ty)               = do { ty' <- go env ty
                                              ; return (mkReflCo r ty') }
       -- Note: Coercions do not contain type synonyms
@@ -2113,8 +2167,10 @@ occCheckExpand tv ty
     go_co env (FunCo r co1 co2)         = do { co1' <- go_co env co1
                                              ; co2' <- go_co env co2
                                              ; return (mkFunCo r co1' co2') }
-    go_co env (CoVarCo c)               = do { k' <- go env (varType c)
-                                             ; return (mkCoVarCo (setVarType c k')) }
+    go_co env (CoVarCo c)               = do { c' <- go_var env c
+                                             ; return (mkCoVarCo c') }
+    go_co env (HoleCo h)                = do { c' <- go_var env (ch_co_var h)
+                                             ; return (HoleCo (h { ch_co_var = c' })) }
     go_co env (AxiomInstCo ax ind args) = do { args' <- mapM (go_co env) args
                                              ; return (mkAxiomInstCo ax ind args') }
     go_co env (UnivCo p r ty1 ty2)      = do { p' <- go_prov env p
@@ -2126,8 +2182,8 @@ occCheckExpand tv ty
     go_co env (TransCo co1 co2)         = do { co1' <- go_co env co1
                                              ; co2' <- go_co env co2
                                              ; return (mkTransCo co1' co2') }
-    go_co env (NthCo n co)              = do { co' <- go_co env co
-                                             ; return (mkNthCo n co') }
+    go_co env (NthCo r n co)            = do { co' <- go_co env co
+                                             ; return (mkNthCo r n co') }
     go_co env (LRCo lr co)              = do { co' <- go_co env co
                                              ; return (mkLRCo lr co') }
     go_co env (InstCo co arg)           = do { co' <- go_co env co
@@ -2148,7 +2204,6 @@ occCheckExpand tv ty
     go_prov env (PhantomProv co)    = PhantomProv <$> go_co env co
     go_prov env (ProofIrrelProv co) = ProofIrrelProv <$> go_co env co
     go_prov _   p@(PluginProv _)    = return p
-    go_prov _   p@(HoleProv _)      = return p
 
 canUnifyWithPolyType :: DynFlags -> TcTyVarDetails -> Bool
 canUnifyWithPolyType dflags details

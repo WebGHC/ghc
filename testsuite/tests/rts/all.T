@@ -35,7 +35,7 @@ test('derefnull',
       when(platform('i386-apple-darwin'), [ignore_stderr, exit_code(139)]),
       when(platform('x86_64-apple-darwin'), [ignore_stderr, exit_code(139)]),
       when(platform('powerpc-apple-darwin'), [ignore_stderr, exit_code(139)]),
-      when(opsys('mingw32'), [ignore_stderr, exit_code(127)]),
+      when(opsys('mingw32'), [ignore_stderr, exit_code(11)]),
       # since these test are supposed to crash the
       # profile report will be empty always.
       # so disable the check for profiling
@@ -54,7 +54,7 @@ test('divbyzero',
       # C programs compiled with gcc exit normally, so do we.
       when(platform('powerpc64-unknown-linux'), [ignore_stdout, exit_code(0)]),
       when(platform('powerpc64le-unknown-linux'), [ignore_stdout, exit_code(0)]),
-      when(opsys('mingw32'), [ignore_stderr, exit_code(127)]),
+      when(opsys('mingw32'), [ignore_stderr, exit_code(8)]),
       # The output under OS X is too unstable to readily compare
       when(platform('i386-apple-darwin'), [ignore_stderr, exit_code(136)]),
       when(platform('x86_64-apple-darwin'), [ignore_stderr, exit_code(136)]),
@@ -74,7 +74,9 @@ test('T2047', [ignore_stdout, extra_run_opts('+RTS -c -RTS')],
 
 # Blackhole-detection test.
 # Skip GHCi due to #2786
-test('T2783', [ omit_ways(['ghci']), exit_code(1) ], compile_and_run, [''])
+test('T2783', [ omit_ways(['ghci']), exit_code(1)
+              , expect_broken_for(2783, ['threaded1'])
+	      ], compile_and_run, [''])
 
 # Test the work-stealing deque implementation.  We run this test in
 # both threaded1 (-threaded -debug) and threaded2 (-threaded) ways.
@@ -98,7 +100,9 @@ test('stack003', [ omit_ways('ghci'), # uses unboxed tuples
                  compile_and_run, [''])
 
 # Test that +RTS -K0 (e.g. no stack limit) parses correctly
-test('stack004', [extra_run_opts('+RTS -K0 -RTS') ], compile_and_run, [''])
+test('stack004', [ extra_run_opts('+RTS -K0 -RTS')
+		 , expect_broken_for(14913, ['ghci'])
+		 ], compile_and_run, [''])
 
 test('atomicinc', [ c_src, only_ways(['normal','threaded1', 'threaded2']) ], compile_and_run, [''])
 test('atomicxchg', [ c_src, only_ways(['threaded1', 'threaded2']) ],
@@ -381,3 +385,20 @@ test('T12497', [ unless(opsys('mingw32'), skip)
 test('T12903', [when(opsys('mingw32'), skip)], compile_and_run, [''])
 test('T13832', exit_code(1), compile_and_run, ['-threaded'])
 test('T13894', normal, compile_and_run, [''])
+test('T14497', normal, compile_and_run, ['-O'])
+test('T14695', normal, run_command, ['$MAKE -s --no-print-directory T14695'])
+test('T14702', [ ignore_stdout
+               , only_ways(['threaded1', 'threaded2'])
+               , extra_run_opts('+RTS -A32m -N8 -T -RTS')
+               ]
+               , compile_and_run, [''])
+
+test('T14900', normal, compile_and_run, ['-package ghc-compact'])
+test('InternalCounters', normal, run_command,
+  ['$MAKE -s --no-print-directory InternalCounters'])
+test('alloccounter1', normal, compile_and_run,
+  [
+    # avoid allocating stack chunks, which counts as
+    # allocation and messes up the results:
+    '-with-rtsopts=-k1m'
+  ])

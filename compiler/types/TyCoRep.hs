@@ -31,13 +31,15 @@ module TyCoRep (
 
         -- * Coercions
         Coercion(..),
-        UnivCoProvenance(..), CoercionHole(..),
+        UnivCoProvenance(..),
+        CoercionHole(..), coHoleCoVar, setCoHoleCoVar,
         CoercionN, CoercionR, CoercionP, KindCoercion,
 
         -- * Functions over types
         mkTyConTy, mkTyVarTy, mkTyVarTys,
         mkFunTy, mkFunTys, mkForAllTy, mkForAllTys,
         mkPiTy, mkPiTys,
+        isTYPE, tcIsTYPE,
         isLiftedTypeKind, isUnliftedTypeKind,
         isCoercionType, isRuntimeRepTy, isRuntimeRepVar,
         sameVis,
@@ -144,7 +146,7 @@ import {-# SOURCE #-} Type( isPredTy, isCoercionTy, mkAppTy, mkCastTy
                           , tyCoVarsOfTypeWellScoped
                           , tyCoVarsOfTypesWellScoped
                           , toposortTyVars
-                          , coreView )
+                          , coreView, tcView )
    -- Transitively pulls in a LOT of stuff, better to break the loop
 
 import {-# SOURCE #-} Coercion
@@ -263,8 +265,10 @@ data Type
         Type
         Type            -- ^ Type application to something other than a 'TyCon'. Parameters:
                         --
-                        --  1) Function: must /not/ be a 'TyConApp',
+                        --  1) Function: must /not/ be a 'TyConApp' or 'CastTy',
                         --     must be another 'AppTy', or 'TyVarTy'
+                        --     See Note [Respecting definitional equality] (EQ1) about the
+                        --     no 'CastTy' requirement
                         --
                         --  2) Argument type
 
@@ -297,8 +301,8 @@ data Type
         Type
         KindCoercion  -- ^ A kind cast. The coercion is always nominal.
                       -- INVARIANT: The cast is never refl.
-                      -- INVARIANT: The cast is "pushed down" as far as it
-                      -- can go. See Note [Pushing down casts]
+                      -- INVARIANT: The Type is not a CastTy (use TransCo instead)
+                      -- See Note [Respecting definitional equality] (EQ2) and (EQ3)
 
   | CoercionTy
         Coercion    -- ^ Injection of a Coercion into a type
@@ -338,19 +342,12 @@ kinds or types.
 
 This kind instantiation only happens in TyConApp currently.
 
-Note [Pushing down casts]
-~~~~~~~~~~~~~~~~~~~~~~~~~
-Suppose we have (a :: k1 -> *), (b :: k1), and (co :: * ~ q).
-The type (a b |> co) is `eqType` to ((a |> co') b), where
-co' = (->) <k1> co. Thus, to make this visible to functions
-that inspect types, we always push down coercions, preferring
-the second form. Note that this also applies to TyConApps!
-
 Note [Non-trivial definitional equality]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Is Int |> <*> the same as Int? YES! In order to reduce headaches,
-we decide that any reflexive casts in types are just ignored. More
-generally, the `eqType` function, which defines Core's type equality
+we decide that any reflexive casts in types are just ignored.
+(Indeed they must be. See Note [Respecting definitional equality].)
+More generally, the `eqType` function, which defines Core's type equality
 relation, ignores casts and coercion arguments, as long as the
 two types have the same kind. This allows us to be a little sloppier
 in keeping track of coercions, which is a good thing. It also means
@@ -383,6 +380,9 @@ The effect of this all is that eqType, the implementation of the implicit
 equality check, can use any homogeneous relation that is smaller than ~, as
 those rules must also be admissible.
 
+A more drawn out argument around all of this is presented in Section 7.2 of
+Richard E's thesis (http://cs.brynmawr.edu/~rae/papers/2016/thesis/eisenberg-thesis.pdf).
+
 What would go wrong if we insisted on the casts matching? See the beginning of
 Section 8 in the unpublished paper above. Theoretically, nothing at all goes
 wrong. But in practical terms, getting the coercions right proved to be
@@ -403,10 +403,67 @@ constructors and destructors in Type respect whatever relation is chosen.
 
 Another helpful principle with eqType is this:
 
- ** If (t1 eqType t2) then I can replace t1 by t2 anywhere. **
+ (EQ) If (t1 `eqType` t2) then I can replace t1 by t2 anywhere.
 
 This principle also tells us that eqType must relate only types with the
 same kinds.
+
+Note [Respecting definitional equality]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Note [Non-trivial definitional equality] introduces the property (EQ).
+How is this upheld?
+
+Any function that pattern matches on all the constructors will have to
+consider the possibility of CastTy. Presumably, those functions will handle
+CastTy appropriately and we'll be OK.
+
+More dangerous are the splitXXX functions. Let's focus on splitTyConApp.
+We don't want it to fail on (T a b c |> co). Happily, if we have
+  (T a b c |> co) `eqType` (T d e f)
+then co must be reflexive. Why? eqType checks that the kinds are equal, as
+well as checking that (a `eqType` d), (b `eqType` e), and (c `eqType` f).
+By the kind check, we know that (T a b c |> co) and (T d e f) have the same
+kind. So the only way that co could be non-reflexive is for (T a b c) to have
+a different kind than (T d e f). But because T's kind is closed (all tycon kinds
+are closed), the only way for this to happen is that one of the arguments has
+to differ, leading to a contradiction. Thus, co is reflexive.
+
+Accordingly, by eliminating reflexive casts, splitTyConApp need not worry
+about outermost casts to uphold (EQ). Eliminating reflexive casts is done
+in mkCastTy.
+
+Unforunately, that's not the end of the story. Consider comparing
+  (T a b c)      =?       (T a b |> (co -> <Type>)) (c |> co)
+These two types have the same kind (Type), but the left type is a TyConApp
+while the right type is not. To handle this case, we say that the right-hand
+type is ill-formed, requiring an AppTy never to have a casted TyConApp
+on its left. It is easy enough to pull around the coercions to maintain
+this invariant, as done in Type.mkAppTy. In the example above, trying to
+form the right-hand type will instead yield (T a b (c |> co |> sym co) |> <Type>).
+Both the casts there are reflexive and will be dropped. Huzzah.
+
+This idea of pulling coercions to the right works for splitAppTy as well.
+
+However, there is one hiccup: it's possible that a coercion doesn't relate two
+Pi-types. For example, if we have @type family Fun a b where Fun a b = a -> b@,
+then we might have (T :: Fun Type Type) and (T |> axFun) Int. That axFun can't
+be pulled to the right. But we don't need to pull it: (T |> axFun) Int is not
+`eqType` to any proper TyConApp -- thus, leaving it where it is doesn't violate
+our (EQ) property.
+
+Lastly, in order to detect reflexive casts reliably, we must make sure not
+to have nested casts: we update (t |> co1 |> co2) to (t |> (co1 `TransCo` co2)).
+
+In sum, in order to uphold (EQ), we need the following three invariants:
+
+  (EQ1) No decomposable CastTy to the left of an AppTy, where a decomposable
+        cast is one that relates either a FunTy to a FunTy or a
+        ForAllTy to a ForAllTy.
+  (EQ2) No reflexive casts in CastTy.
+  (EQ3) No nested CastTys.
+
+These invariants are all documented above, in the declaration for Type.
+
 -}
 
 {- **********************************************************************
@@ -485,7 +542,8 @@ This table summarises the visibility rules:
 |  tvis :: ArgFlag
 |  tvis = Inferred:            f :: forall {a}. type    Arg not allowed:  f
 |  tvis = Specified:           f :: forall a. type      Arg optional:     f  or  f @Int
-|  tvis = Required:   Illegal: See Note [No Required TyBinder in terms]
+|  tvis = Required:            T :: forall k -> type    Arg required:     T *
+|    This last form is illegal in terms: See Note [No Required TyBinder in terms]
 |
 | TvBndr k cvis :: TyConBinder, in the TyConBinders of a TyCon
 |  cvis :: TyConBndrVis
@@ -704,22 +762,45 @@ mkTyConTy tycon = TyConApp tycon []
 Some basic functions, put here to break loops eg with the pretty printer
 -}
 
-is_TYPE :: (   Type    -- the single argument to TYPE; not a synonym
-            -> Bool )  -- what to return
-        -> Kind -> Bool
-is_TYPE f ki | Just ki' <- coreView ki = is_TYPE f ki'
-is_TYPE f (TyConApp tc [arg])
+-- | If a type is @'TYPE' r@ for some @r@, run the predicate argument on @r@.
+-- Otherwise, return 'False'.
+--
+-- This function does not distinguish between 'Constraint' and 'Type'. For a
+-- version which does distinguish between the two, see 'tcIsTYPE'.
+isTYPE :: (   Type    -- the single argument to TYPE; not a synonym
+           -> Bool )  -- what to return
+       -> Kind -> Bool
+isTYPE f ki | Just ki' <- coreView ki = isTYPE f ki'
+isTYPE f (TyConApp tc [arg])
   | tc `hasKey` tYPETyConKey
   = go arg
     where
       go ty | Just ty' <- coreView ty = go ty'
       go ty = f ty
-is_TYPE _ _ = False
+isTYPE _ _ = False
 
--- | This version considers Constraint to be distinct from *. Returns True
--- if the argument is equivalent to Type and False otherwise.
+-- | If a type is @'TYPE' r@ for some @r@, run the predicate argument on @r@.
+-- Otherwise, return 'False'.
+--
+-- This function distinguishes between 'Constraint' and 'Type' (and will return
+-- 'False' for 'Constraint'). For a version which does not distinguish between
+-- the two, see 'isTYPE'.
+tcIsTYPE :: (   Type    -- the single argument to TYPE; not a synonym
+             -> Bool )  -- what to return
+         -> Kind -> Bool
+tcIsTYPE f ki | Just ki' <- tcView ki = tcIsTYPE f ki'
+tcIsTYPE f (TyConApp tc [arg])
+  | tc `hasKey` tYPETyConKey
+  = go arg
+    where
+      go ty | Just ty' <- tcView ty = go ty'
+      go ty = f ty
+tcIsTYPE _ _ = False
+
+-- | This version considers Constraint to be the same as *. Returns True
+-- if the argument is equivalent to Type/Constraint and False otherwise.
 isLiftedTypeKind :: Kind -> Bool
-isLiftedTypeKind = is_TYPE is_lifted
+isLiftedTypeKind = isTYPE is_lifted
   where
     is_lifted (TyConApp lifted_rep []) = lifted_rep `hasKey` liftedRepDataConKey
     is_lifted _                        = False
@@ -728,9 +809,9 @@ isLiftedTypeKind = is_TYPE is_lifted
 -- Note that this returns False for levity-polymorphic kinds, which may
 -- be specialized to a kind that classifies unlifted types.
 isUnliftedTypeKind :: Kind -> Bool
-isUnliftedTypeKind = is_TYPE is_unlifted
+isUnliftedTypeKind = isTYPE is_unlifted
   where
-    is_unlifted (TyConApp rr _args) = not (rr `hasKey` liftedRepDataConKey)
+    is_unlifted (TyConApp rr _args) = elem (getUnique rr) unliftedRepDataConKeys
     is_unlifted _                   = False
 
 -- | Is this the type 'RuntimeRep'?
@@ -812,20 +893,25 @@ data Coercion
      -- any left over, we use AppCo.
      -- See [Coercion axioms applied to coercions]
 
+  | AxiomRuleCo CoAxiomRule [Coercion]
+    -- AxiomRuleCo is very like AxiomInstCo, but for a CoAxiomRule
+    -- The number coercions should match exactly the expectations
+    -- of the CoAxiomRule (i.e., the rule is fully saturated).
+
   | UnivCo UnivCoProvenance Role Type Type
       -- :: _ -> "e" -> _ -> _ -> e
 
   | SymCo Coercion             -- :: e -> e
   | TransCo Coercion Coercion  -- :: e -> e -> e
 
-    -- The number coercions should match exactly the expectations
-    -- of the CoAxiomRule (i.e., the rule is fully saturated).
-  | AxiomRuleCo CoAxiomRule [Coercion]
-
-  | NthCo  Int         Coercion     -- Zero-indexed; decomposes (T t0 ... tn)
-    -- :: _ -> e -> ?? (inverse of TyConAppCo, see Note [TyConAppCo roles])
+  | NthCo  Role Int Coercion     -- Zero-indexed; decomposes (T t0 ... tn)
+    -- :: "e" -> _ -> e0 -> e (inverse of TyConAppCo, see Note [TyConAppCo roles])
     -- Using NthCo on a ForAllCo gives an N coercion always
     -- See Note [NthCo and newtypes]
+    --
+    -- Invariant:  (NthCo r i co), it is always the case that r = role of (Nth i co)
+    -- That is: the role of the entire coercion is redundantly cached here.
+    -- See Note [NthCo Cached Roles]
 
   | LRCo   LeftOrRight CoercionN     -- Decomposes (t_left t_right)
     -- :: _ -> N -> N
@@ -846,6 +932,8 @@ data Coercion
   | SubCo CoercionN                  -- Turns a ~N into a ~R
     -- :: N -> R
 
+  | HoleCo CoercionHole              -- ^ See Note [Coercion holes]
+                                     -- Only present during typechecking
   deriving Data.Data
 
 type CoercionN = Coercion       -- always nominal
@@ -1133,7 +1221,7 @@ We can then build
 for any `a` and `b`. Because of the role annotation on N, if we use
 NthCo, we'll get out a representational coercion. That is:
 
-  NthCo 0 co :: forall a b. a ~R b
+  NthCo r 0 co :: forall a b. a ~R b
 
 Yikes! Clearly, this is terrible. The solution is simple: forbid
 NthCo to be used on newtypes if the internal coercion is representational.
@@ -1141,6 +1229,23 @@ NthCo to be used on newtypes if the internal coercion is representational.
 This is not just some corner case discovered by a segfault somewhere;
 it was discovered in the proof of soundness of roles and described
 in the "Safe Coercions" paper (ICFP '14).
+
+Note [NthCo Cached Roles]
+~~~~~~~~~~~~~~~~~~~~~~~~~
+Why do we cache the role of NthCo in the NthCo constructor?
+Because computing role(Nth i co) involves figuring out that
+
+  co :: T tys1 ~ T tys2
+
+using coercionKind, and finding (coercionRole co), and then looking
+at the tyConRoles of T. Avoiding bad asymptotic behaviour here means
+we have to compute the kind and role of a coercion simultaneously,
+which makes the code complicated and inefficient.
+
+This only happens for NthCo. Caching the role solves the problem, and
+allows coercionKind and coercionRole to be simple.
+
+See Trac #11735
 
 Note [InstCo roles]
 ~~~~~~~~~~~~~~~~~~~
@@ -1199,7 +1304,6 @@ data UnivCoProvenance
   | PluginProv String  -- ^ From a plugin, which asserts that this coercion
                        --   is sound. The string is for the use of the plugin.
 
-  | HoleProv CoercionHole  -- ^ See Note [Coercion holes]
   deriving Data.Data
 
 instance Outputable UnivCoProvenance where
@@ -1207,13 +1311,20 @@ instance Outputable UnivCoProvenance where
   ppr (PhantomProv _)    = text "(phantom)"
   ppr (ProofIrrelProv _) = text "(proof irrel.)"
   ppr (PluginProv str)   = parens (text "plugin" <+> brackets (text str))
-  ppr (HoleProv hole)    = parens (text "hole" <> ppr hole)
 
 -- | A coercion to be filled in by the type-checker. See Note [Coercion holes]
 data CoercionHole
-  = CoercionHole { chUnique   :: Unique   -- ^ used only for debugging
-                 , chCoercion :: IORef (Maybe Coercion)
+  = CoercionHole { ch_co_var :: CoVar
+                       -- See Note [CoercionHoles and coercion free variables]
+
+                 , ch_ref    :: IORef (Maybe Coercion)
                  }
+
+coHoleCoVar :: CoercionHole -> CoVar
+coHoleCoVar = ch_co_var
+
+setCoHoleCoVar :: CoercionHole -> CoVar -> CoercionHole
+setCoHoleCoVar h cv = h { ch_co_var = cv }
 
 instance Data.Data CoercionHole where
   -- don't traverse?
@@ -1222,7 +1333,7 @@ instance Data.Data CoercionHole where
   dataTypeOf _ = mkNoRepType "CoercionHole"
 
 instance Outputable CoercionHole where
-  ppr (CoercionHole u _) = braces (ppr u)
+  ppr (CoercionHole { ch_co_var = cv }) = braces (ppr cv)
 
 
 {- Note [Phantom coercions]
@@ -1249,7 +1360,7 @@ During typechecking, constraint solving for type classes works by
 
 For equality constraints we use a different strategy.  See Note [The
 equality types story] in TysPrim for background on equality constraints.
-  - For boxed equality constraints, (t1 ~N t2) and (t1 ~R t2), it's just
+  - For /boxed/ equality constraints, (t1 ~N t2) and (t1 ~R t2), it's just
     like type classes above. (Indeed, boxed equality constraints *are* classes.)
   - But for /unboxed/ equality constraints (t1 ~R# t2) and (t1 ~N# t2)
     we use a different plan
@@ -1258,40 +1369,61 @@ For unboxed equalities:
   - Generate a CoercionHole, a mutable variable just like a unification
     variable
   - Wrap the CoercionHole in a Wanted constraint; see TcRnTypes.TcEvDest
-  - Use the CoercionHole in a Coercion, via HoleProv
+  - Use the CoercionHole in a Coercion, via HoleCo
   - Solve the constraint later
   - When solved, fill in the CoercionHole by side effect, instead of
     doing the let-binding thing
 
 The main reason for all this is that there may be no good place to let-bind
 the evidence for unboxed equalities:
-  - We emit constraints for kind coercions, to be used
-    to cast a type's kind. These coercions then must be used in types. Because
-    they might appear in a top-level type, there is no place to bind these
-   (unlifted) coercions in the usual way.
+
+  - We emit constraints for kind coercions, to be used to cast a
+    type's kind. These coercions then must be used in types. Because
+    they might appear in a top-level type, there is no place to bind
+    these (unlifted) coercions in the usual way.
 
   - A coercion for (forall a. t1) ~ (forall a. t2) will look like
        forall a. (coercion for t1~t2)
-    But the coercion for (t1~t2) may mention 'a', and we don't have let-bindings
-    within coercions.  We could add them, but coercion holes are easier.
+    But the coercion for (t1~t2) may mention 'a', and we don't have
+    let-bindings within coercions.  We could add them, but coercion
+    holes are easier.
+
+  - Moreover, nothing is lost from the lack of let-bindings. For
+    dicionaries want to achieve sharing to avoid recomoputing the
+    dictionary.  But coercions are entirely erased, so there's little
+    benefit to sharing. Indeed, even if we had a let-binding, we
+    always inline types and coercions at every use site and drop the
+    binding.
 
 Other notes about HoleCo:
 
- * INVARIANT: CoercionHole and HoleProv are used only during type checking,
+ * INVARIANT: CoercionHole and HoleCo are used only during type checking,
    and should never appear in Core. Just like unification variables; a Type
    can contain a TcTyVar, but only during type checking. If, one day, we
    use type-level information to separate out forms that can appear during
    type-checking vs forms that can appear in core proper, holes in Core will
    be ruled out.
 
- * The Unique carried with a coercion hole is used solely for debugging.
+ * See Note [CoercionHoles and coercion free variables]
 
- * Coercion holes can be compared for equality only like other coercions:
-   only by looking at the types coerced.
+ * Coercion holes can be compared for equality like other coercions:
+   by looking at the types coerced.
 
- * We don't use holes for other evidence because other evidence wants to
-   be /shared/. But coercions are entirely erased, so there's little
-   benefit to sharing.
+
+Note [CoercionHoles and coercion free variables]
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Why does a CoercionHole contain a CoVar, as well as reference to
+fill in?  Because we want to treat that CoVar as a free variable of
+the coercion.  See Trac #14584, and Note [What prevents a
+constraint from floating] in TcSimplify, item (4):
+
+        forall k. [W] co1 :: t1 ~# t2 |> co2
+                  [W] co2 :: k ~# *
+
+Here co2 is a CoercionHole. But we /must/ know that it is free in
+co1, because that's all that stops it floating outside the
+implication.
+
 
 Note [ProofIrrelProv]
 ~~~~~~~~~~~~~~~~~~~~~
@@ -1453,20 +1585,27 @@ tyCoFVsOfCo (ForAllCo tv kind_co co) fv_cand in_scope acc
 tyCoFVsOfCo (FunCo _ co1 co2)    fv_cand in_scope acc
   = (tyCoFVsOfCo co1 `unionFV` tyCoFVsOfCo co2) fv_cand in_scope acc
 tyCoFVsOfCo (CoVarCo v) fv_cand in_scope acc
-  = (unitFV v `unionFV` tyCoFVsOfType (varType v)) fv_cand in_scope acc
+  = tyCoFVsOfCoVar v fv_cand in_scope acc
+tyCoFVsOfCo (HoleCo h) fv_cand in_scope acc
+  = tyCoFVsOfCoVar (coHoleCoVar h) fv_cand in_scope acc
+    -- See Note [CoercionHoles and coercion free variables]
 tyCoFVsOfCo (AxiomInstCo _ _ cos) fv_cand in_scope acc = tyCoFVsOfCos cos fv_cand in_scope acc
 tyCoFVsOfCo (UnivCo p _ t1 t2) fv_cand in_scope acc
   = (tyCoFVsOfProv p `unionFV` tyCoFVsOfType t1
-                         `unionFV` tyCoFVsOfType t2) fv_cand in_scope acc
+                     `unionFV` tyCoFVsOfType t2) fv_cand in_scope acc
 tyCoFVsOfCo (SymCo co)          fv_cand in_scope acc = tyCoFVsOfCo co fv_cand in_scope acc
 tyCoFVsOfCo (TransCo co1 co2)   fv_cand in_scope acc = (tyCoFVsOfCo co1 `unionFV` tyCoFVsOfCo co2) fv_cand in_scope acc
-tyCoFVsOfCo (NthCo _ co)        fv_cand in_scope acc = tyCoFVsOfCo co fv_cand in_scope acc
+tyCoFVsOfCo (NthCo _ _ co)      fv_cand in_scope acc = tyCoFVsOfCo co fv_cand in_scope acc
 tyCoFVsOfCo (LRCo _ co)         fv_cand in_scope acc = tyCoFVsOfCo co fv_cand in_scope acc
 tyCoFVsOfCo (InstCo co arg)     fv_cand in_scope acc = (tyCoFVsOfCo co `unionFV` tyCoFVsOfCo arg) fv_cand in_scope acc
 tyCoFVsOfCo (CoherenceCo c1 c2) fv_cand in_scope acc = (tyCoFVsOfCo c1 `unionFV` tyCoFVsOfCo c2) fv_cand in_scope acc
 tyCoFVsOfCo (KindCo co)         fv_cand in_scope acc = tyCoFVsOfCo co fv_cand in_scope acc
 tyCoFVsOfCo (SubCo co)          fv_cand in_scope acc = tyCoFVsOfCo co fv_cand in_scope acc
 tyCoFVsOfCo (AxiomRuleCo _ cs)  fv_cand in_scope acc = tyCoFVsOfCos cs fv_cand in_scope acc
+
+tyCoFVsOfCoVar :: CoVar -> FV
+tyCoFVsOfCoVar v fv_cand in_scope acc
+  = (unitFV v `unionFV` tyCoFVsOfType (varType v)) fv_cand in_scope acc
 
 tyCoVarsOfProv :: UnivCoProvenance -> TyCoVarSet
 tyCoVarsOfProv prov = fvVarSet $ tyCoFVsOfProv prov
@@ -1476,7 +1615,6 @@ tyCoFVsOfProv UnsafeCoerceProv    fv_cand in_scope acc = emptyFV fv_cand in_scop
 tyCoFVsOfProv (PhantomProv co)    fv_cand in_scope acc = tyCoFVsOfCo co fv_cand in_scope acc
 tyCoFVsOfProv (ProofIrrelProv co) fv_cand in_scope acc = tyCoFVsOfCo co fv_cand in_scope acc
 tyCoFVsOfProv (PluginProv _)      fv_cand in_scope acc = emptyFV fv_cand in_scope acc
-tyCoFVsOfProv (HoleProv _)        fv_cand in_scope acc = emptyFV fv_cand in_scope acc
 
 tyCoVarsOfCos :: [Coercion] -> TyCoVarSet
 tyCoVarsOfCos cos = fvVarSet $ tyCoFVsOfCos cos
@@ -1512,26 +1650,30 @@ coVarsOfCo (TyConAppCo _ _ args) = coVarsOfCos args
 coVarsOfCo (AppCo co arg)      = coVarsOfCo co `unionVarSet` coVarsOfCo arg
 coVarsOfCo (ForAllCo tv kind_co co)
   = coVarsOfCo co `delVarSet` tv `unionVarSet` coVarsOfCo kind_co
-coVarsOfCo (FunCo _ co1 co2)   = coVarsOfCo co1 `unionVarSet` coVarsOfCo co2
-coVarsOfCo (CoVarCo v)         = unitVarSet v `unionVarSet` coVarsOfType (varType v)
-coVarsOfCo (AxiomInstCo _ _ args) = coVarsOfCos args
-coVarsOfCo (UnivCo p _ t1 t2)  = coVarsOfProv p `unionVarSet` coVarsOfTypes [t1, t2]
-coVarsOfCo (SymCo co)          = coVarsOfCo co
-coVarsOfCo (TransCo co1 co2)   = coVarsOfCo co1 `unionVarSet` coVarsOfCo co2
-coVarsOfCo (NthCo _ co)        = coVarsOfCo co
-coVarsOfCo (LRCo _ co)         = coVarsOfCo co
-coVarsOfCo (InstCo co arg)     = coVarsOfCo co `unionVarSet` coVarsOfCo arg
-coVarsOfCo (CoherenceCo c1 c2) = coVarsOfCos [c1, c2]
-coVarsOfCo (KindCo co)         = coVarsOfCo co
-coVarsOfCo (SubCo co)          = coVarsOfCo co
-coVarsOfCo (AxiomRuleCo _ cs)  = coVarsOfCos cs
+coVarsOfCo (FunCo _ co1 co2)    = coVarsOfCo co1 `unionVarSet` coVarsOfCo co2
+coVarsOfCo (CoVarCo v)          = coVarsOfCoVar v
+coVarsOfCo (HoleCo h)           = coVarsOfCoVar (coHoleCoVar h)
+                                  -- See Note [CoercionHoles and coercion free variables]
+coVarsOfCo (AxiomInstCo _ _ as) = coVarsOfCos as
+coVarsOfCo (UnivCo p _ t1 t2)   = coVarsOfProv p `unionVarSet` coVarsOfTypes [t1, t2]
+coVarsOfCo (SymCo co)           = coVarsOfCo co
+coVarsOfCo (TransCo co1 co2)    = coVarsOfCo co1 `unionVarSet` coVarsOfCo co2
+coVarsOfCo (NthCo _ _ co)       = coVarsOfCo co
+coVarsOfCo (LRCo _ co)          = coVarsOfCo co
+coVarsOfCo (InstCo co arg)      = coVarsOfCo co `unionVarSet` coVarsOfCo arg
+coVarsOfCo (CoherenceCo c1 c2)  = coVarsOfCos [c1, c2]
+coVarsOfCo (KindCo co)          = coVarsOfCo co
+coVarsOfCo (SubCo co)           = coVarsOfCo co
+coVarsOfCo (AxiomRuleCo _ cs)   = coVarsOfCos cs
+
+coVarsOfCoVar :: CoVar -> CoVarSet
+coVarsOfCoVar v = unitVarSet v `unionVarSet` coVarsOfType (varType v)
 
 coVarsOfProv :: UnivCoProvenance -> CoVarSet
 coVarsOfProv UnsafeCoerceProv    = emptyVarSet
 coVarsOfProv (PhantomProv co)    = coVarsOfCo co
 coVarsOfProv (ProofIrrelProv co) = coVarsOfCo co
 coVarsOfProv (PluginProv _)      = emptyVarSet
-coVarsOfProv (HoleProv _)        = emptyVarSet
 
 coVarsOfCos :: [Coercion] -> CoVarSet
 coVarsOfCos cos = mapUnionVarSet coVarsOfCo cos
@@ -1616,13 +1758,14 @@ noFreeVarsOfCo (AppCo c1 c2)          = noFreeVarsOfCo c1 && noFreeVarsOfCo c2
 noFreeVarsOfCo co@(ForAllCo {})       = isEmptyVarSet (tyCoVarsOfCo co)
 noFreeVarsOfCo (FunCo _ c1 c2)        = noFreeVarsOfCo c1 && noFreeVarsOfCo c2
 noFreeVarsOfCo (CoVarCo _)            = False
+noFreeVarsOfCo (HoleCo {})            = True    -- I'm unsure; probably never happens
 noFreeVarsOfCo (AxiomInstCo _ _ args) = all noFreeVarsOfCo args
 noFreeVarsOfCo (UnivCo p _ t1 t2)     = noFreeVarsOfProv p &&
                                         noFreeVarsOfType t1 &&
                                         noFreeVarsOfType t2
 noFreeVarsOfCo (SymCo co)             = noFreeVarsOfCo co
 noFreeVarsOfCo (TransCo co1 co2)      = noFreeVarsOfCo co1 && noFreeVarsOfCo co2
-noFreeVarsOfCo (NthCo _ co)           = noFreeVarsOfCo co
+noFreeVarsOfCo (NthCo _ _ co)         = noFreeVarsOfCo co
 noFreeVarsOfCo (LRCo _ co)            = noFreeVarsOfCo co
 noFreeVarsOfCo (InstCo co1 co2)       = noFreeVarsOfCo co1 && noFreeVarsOfCo co2
 noFreeVarsOfCo (CoherenceCo co1 co2)  = noFreeVarsOfCo co1 && noFreeVarsOfCo co2
@@ -1637,7 +1780,6 @@ noFreeVarsOfProv UnsafeCoerceProv    = True
 noFreeVarsOfProv (PhantomProv co)    = noFreeVarsOfCo co
 noFreeVarsOfProv (ProofIrrelProv co) = noFreeVarsOfCo co
 noFreeVarsOfProv (PluginProv {})     = True
-noFreeVarsOfProv (HoleProv {})       = True -- matches with coVarsOfProv, but I'm unsure
 
 {-
 %************************************************************************
@@ -2045,7 +2187,8 @@ ForAllCo tv (sym h) (sym g[tv |-> tv |> sym h])
 substTyWith :: HasCallStack => [TyVar] -> [Type] -> Type -> Type
 -- Works only if the domain of the substitution is a
 -- superset of the type being substituted into
-substTyWith tvs tys = ASSERT( tvs `equalLength` tys )
+substTyWith tvs tys = {-#SCC "substTyWith" #-}
+                      ASSERT( tvs `equalLength` tys )
                       substTy (zipTvSubst tvs tys)
 
 -- | Type substitution, see 'zipTvSubst'. Disables sanity checks.
@@ -2123,7 +2266,8 @@ isValidTCvSubst (TCvSubst in_scope tenv cenv) =
 -- Note [The substitution invariant].
 checkValidSubst :: HasCallStack => TCvSubst -> [Type] -> [Coercion] -> a -> a
 checkValidSubst subst@(TCvSubst in_scope tenv cenv) tys cos a
-  = ASSERT2( isValidTCvSubst subst,
+-- TODO (RAE): Change back to ASSERT
+  = WARN( not ({-#SCC "isValidTCvSubst" #-} isValidTCvSubst subst),
              text "in_scope" <+> ppr in_scope $$
              text "tenv" <+> ppr tenv $$
              text "tenvFVs"
@@ -2133,7 +2277,7 @@ checkValidSubst subst@(TCvSubst in_scope tenv cenv) tys cos a
                <+> ppr (tyCoVarsOfCosSet cenv) $$
              text "tys" <+> ppr tys $$
              text "cos" <+> ppr cos )
-    ASSERT2( tysCosFVsInScope,
+    WARN( not ({-#SCC "tysCosFVsInScope" #-} tysCosFVsInScope),
              text "in_scope" <+> ppr in_scope $$
              text "tenv" <+> ppr tenv $$
              text "cenv" <+> ppr cenv $$
@@ -2291,7 +2435,7 @@ subst_co subst co
                                 (go_ty t1)) $! (go_ty t2)
     go (SymCo co)            = mkSymCo $! (go co)
     go (TransCo co1 co2)     = (mkTransCo $! (go co1)) $! (go co2)
-    go (NthCo d co)          = mkNthCo d $! (go co)
+    go (NthCo r d co)        = mkNthCo r d $! (go co)
     go (LRCo lr co)          = mkLRCo lr $! (go co)
     go (InstCo co arg)       = (mkInstCo $! (go co)) $! go arg
     go (CoherenceCo co1 co2) = (mkCoherenceCo $! (go co1)) $! (go co2)
@@ -2299,16 +2443,18 @@ subst_co subst co
     go (SubCo co)            = mkSubCo $! (go co)
     go (AxiomRuleCo c cs)    = let cs1 = map go cs
                                 in cs1 `seqList` AxiomRuleCo c cs1
+    go (HoleCo h)            = HoleCo h
+      -- NB: this last case is a little suspicious, but we need it. Originally,
+      -- there was a panic here, but it triggered from deeplySkolemise. Because
+      -- we only skolemise tyvars that are manually bound, this operation makes
+      -- sense, even over a coercion with holes.  We don't need to substitute
+      -- in the type of the coHoleCoVar because it wouldn't makes sense to have
+      --    forall a. ....(ty |> {hole_cv::a})....
 
     go_prov UnsafeCoerceProv     = UnsafeCoerceProv
     go_prov (PhantomProv kco)    = PhantomProv (go kco)
     go_prov (ProofIrrelProv kco) = ProofIrrelProv (go kco)
     go_prov p@(PluginProv _)     = p
-    go_prov p@(HoleProv _)       = p
-      -- NB: this last case is a little suspicious, but we need it. Originally,
-      -- there was a panic here, but it triggered from deeplySkolemise. Because
-      -- we only skolemise tyvars that are manually bound, this operation makes
-      -- sense, even over a coercion with holes.
 
 substForAllCoBndr :: TCvSubst -> TyVar -> Coercion -> (TCvSubst, TyVar, Coercion)
 substForAllCoBndr subst
@@ -2335,7 +2481,7 @@ substForAllCoBndrCallback sym sco (TCvSubst in_scope tenv cenv)
   where
     new_env | no_change && not sym = delVarEnv tenv old_var
             | sym       = extendVarEnv tenv old_var $
-                            TyVarTy new_var `CastTy` new_kind_co
+                          TyVarTy new_var `CastTy` new_kind_co
             | otherwise = extendVarEnv tenv old_var (TyVarTy new_var)
 
     no_kind_change = noFreeVarsOfCo old_kind_co
@@ -2882,13 +3028,14 @@ tidyCo env@(_, subst) co
     go (CoVarCo cv)          = case lookupVarEnv subst cv of
                                  Nothing  -> CoVarCo cv
                                  Just cv' -> CoVarCo cv'
+    go (HoleCo h)            = HoleCo h
     go (AxiomInstCo con ind cos) = let args = map go cos
                                in  args `seqList` AxiomInstCo con ind args
     go (UnivCo p r t1 t2)    = (((UnivCo $! (go_prov p)) $! r) $!
                                 tidyType env t1) $! tidyType env t2
     go (SymCo co)            = SymCo $! go co
     go (TransCo co1 co2)     = (TransCo $! go co1) $! go co2
-    go (NthCo d co)          = NthCo d $! go co
+    go (NthCo r d co)        = NthCo r d $! go co
     go (LRCo lr co)          = LRCo lr $! go co
     go (InstCo co ty)        = (InstCo $! go co) $! go ty
     go (CoherenceCo co1 co2) = (CoherenceCo $! go co1) $! go co2
@@ -2901,7 +3048,6 @@ tidyCo env@(_, subst) co
     go_prov (PhantomProv co)    = PhantomProv (go co)
     go_prov (ProofIrrelProv co) = ProofIrrelProv (go co)
     go_prov p@(PluginProv _)    = p
-    go_prov p@(HoleProv _)      = p
 
 tidyCos :: TidyEnv -> [Coercion] -> [Coercion]
 tidyCos env = map (tidyCo env)
@@ -2943,11 +3089,12 @@ coercionSize (AppCo co arg)      = coercionSize co + coercionSize arg
 coercionSize (ForAllCo _ h co)   = 1 + coercionSize co + coercionSize h
 coercionSize (FunCo _ co1 co2)   = 1 + coercionSize co1 + coercionSize co2
 coercionSize (CoVarCo _)         = 1
+coercionSize (HoleCo _)          = 1
 coercionSize (AxiomInstCo _ _ args) = 1 + sum (map coercionSize args)
 coercionSize (UnivCo p _ t1 t2)  = 1 + provSize p + typeSize t1 + typeSize t2
 coercionSize (SymCo co)          = 1 + coercionSize co
 coercionSize (TransCo co1 co2)   = 1 + coercionSize co1 + coercionSize co2
-coercionSize (NthCo _ co)        = 1 + coercionSize co
+coercionSize (NthCo _ _ co)      = 1 + coercionSize co
 coercionSize (LRCo  _ co)        = 1 + coercionSize co
 coercionSize (InstCo co arg)     = 1 + coercionSize co + coercionSize arg
 coercionSize (CoherenceCo c1 c2) = 1 + coercionSize c1 + coercionSize c2
@@ -2960,4 +3107,3 @@ provSize UnsafeCoerceProv    = 1
 provSize (PhantomProv co)    = 1 + coercionSize co
 provSize (ProofIrrelProv co) = 1 + coercionSize co
 provSize (PluginProv _)      = 1
-provSize (HoleProv h)        = pprPanic "provSize hits a hole" (ppr h)

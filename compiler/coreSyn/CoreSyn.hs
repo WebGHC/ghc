@@ -401,10 +401,10 @@ The solution is simply to allow top-level unlifted binders. We can't allow
 arbitrary unlifted expression at the top-level though, unlifted binders cannot
 be thunks, so we just allow string literals.
 
-It is important to note that top-level primitive string literals cannot be
-wrapped in Ticks, as is otherwise done with lifted bindings. CoreToStg expects
-to see just a plain (Lit (MachStr ...)) expression on the RHS of primitive
-string bindings; anything else and things break. CoreLint checks this invariant.
+We allow the top-level primitive string literals to be wrapped in Ticks
+in the same way they can be wrapped when nested in an expression.
+CoreToSTG currently discards Ticks around top-level primitive string literals.
+See Trac #14779.
 
 Also see Note [Compilation plan for top-level string literals].
 
@@ -414,7 +414,7 @@ Here is a summary on how top-level string literals are handled by various
 parts of the compilation pipeline.
 
 * In the source language, there is no way to bind a primitive string literal
-  at the top leve.
+  at the top level.
 
 * In Core, we have a special rule that permits top-level Addr# bindings. See
   Note [CoreSyn top-level string literals]. Core-to-core passes may introduce
@@ -706,33 +706,64 @@ polymorphic in its return type. That is, if its type is
   forall a1 ... ak. t1 -> ... -> tn -> r
 
 where its join arity is k+n, none of the type parameters ai may occur free in r.
-The most direct explanation is that given
 
-  join j @a1 ... @ak x1 ... xn = e1 in e2
+In some way, this falls out of the fact that given
 
-our typing rules require `e1` and `e2` to have the same type. Therefore the type
-of `e1`---the return type of the join point---must be the same as the type of
-e2. Since the type variables aren't bound in `e2`, its type can't include them,
-and thus neither can the type of `e1`.
+  join
+     j @a1 ... @ak x1 ... xn = e1
+  in e2
 
-There's a deeper explanation in terms of the sequent calculus in Section 5.3 of
-a previous paper:
+then all calls to `j` are in tail-call positions of `e`, and expressions in
+tail-call positions in `e` have the same type as `e`.
+Therefore the type of `e1` -- the return type of the join point -- must be the
+same as the type of e2.
+Since the type variables aren't bound in `e2`, its type can't include them, and
+thus neither can the type of `e1`.
 
-  Paul Downen, Luke Maurer, Zena Ariola, and Simon Peyton Jones. "Sequent
-  calculus as a compiler intermediate language." ICFP'16.
+This unfortunately prevents the `go` in the following code from being a
+join-point:
 
-  https://www.microsoft.com/en-us/research/wp-content/uploads/2016/04/sequent-calculus-icfp16.pdf
+  iter :: forall a. Int -> (a -> a) -> a -> a
+  iter @a n f x = go @a n f x
+    where
+      go :: forall a. Int -> (a -> a) -> a -> a
+      go @a 0 _ x = x
+      go @a n f x = go @a (n-1) f (f x)
 
-The quick version: Consider the CPS term (the paper uses the sequent calculus,
-but we can translate readily):
+In this case, a static argument transformation would fix that (see
+ticket #14620):
 
-  \k -> join j @a1 ... @ak x1 ... xn = e1 k in e2 k
+  iter :: forall a. Int -> (a -> a) -> a -> a
+  iter @a n f x = go' @a n f x
+    where
+      go' :: Int -> (a -> a) -> a -> a
+      go' 0 _ x = x
+      go' n f x = go' (n-1) f (f x)
 
-Since `j` is a join point, it doesn't bind a continuation variable but reuses
-the variable `k` from the context. But the parameters `ai` are not in `k`'s
-scope, and `k`'s type determines the return type of `j`; thus the `ai`s don't
-appear in the return type of `j`. (Also, since `e1` and `e2` are passed the same
-continuation, they must have the same type; hence the direct explanation above.)
+In general, loopification could be employed to do that (see #14068.)
+
+Can we simply drop the requirement, and allow `go` to be a join-point? We
+could, and it would work. But we could not longer apply the case-of-join-point
+transformation universally. This transformation would do:
+
+  case (join go @a n f x = case n of 0 -> x
+                                     n -> go @a (n-1) f (f x)
+        in go @Bool n neg True) of
+    True -> e1; False -> e2
+
+ ===>
+
+  join go @a n f x = case n of 0 -> case x of True -> e1; False -> e2
+                          n -> go @a (n-1) f (f x)
+  in go @Bool n neg True
+
+but that is ill-typed, as `x` is type `a`, not `Bool`.
+
+
+This is also justifies why we do not consider the `e` in `e |> co` to be in
+tail position: A cast changes the type, but the type must be the same. But
+operationally, casts are vacuous, so this is a bit unfortunate! See #14610 for
+ideas how to fix this.
 
 ************************************************************************
 *                                                                      *
@@ -859,7 +890,7 @@ data TickishScoping =
 
     -- | Soft scoping: We want all code that is covered to stay
     -- covered.  Note that this scope type does not forbid
-    -- transformations from happening, as as long as all results of
+    -- transformations from happening, as long as all results of
     -- the transformations are still covered by this tick or a copy of
     -- it. For example
     --
@@ -2024,7 +2055,7 @@ collectNBinders orig_n orig_expr
     go n bs (Lam b e) = go (n-1) (b:bs) e
     go _ _  _         = pprPanic "collectNBinders" $ int orig_n
 
--- | Takes a nested application expression and returns the the function
+-- | Takes a nested application expression and returns the function
 -- being applied and the arguments to which it is applied
 collectArgs :: Expr b -> (Expr b, [Arg b])
 collectArgs expr
@@ -2127,7 +2158,7 @@ data AnnBind bndr annot
   = AnnNonRec bndr (AnnExpr bndr annot)
   | AnnRec    [(bndr, AnnExpr bndr annot)]
 
--- | Takes a nested application expression and returns the the function
+-- | Takes a nested application expression and returns the function
 -- being applied and the arguments to which it is applied
 collectAnnArgs :: AnnExpr b a -> (AnnExpr b a, [AnnExpr b a])
 collectAnnArgs expr

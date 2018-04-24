@@ -11,7 +11,10 @@
 -----------------------------------------------------------------------------
 -}
 
-module SysTools.BaseDir (expandTopDir, findTopDir) where
+module SysTools.BaseDir
+  ( expandTopDir, expandToolDir
+  , findTopDir, findToolDir
+  ) where
 
 #include "HsVersions.h"
 
@@ -29,12 +32,7 @@ import System.Environment (getExecutablePath)
 
 -- Windows
 #if defined(mingw32_HOST_OS)
-#if MIN_VERSION_Win32(2,5,0)
 import qualified System.Win32.Types as Win32
-#else
-import qualified System.Win32.Info as Win32
-#endif
-import Data.Char
 import Exception
 import Foreign
 import Foreign.C.String
@@ -75,16 +73,42 @@ On Windows:
 
 from topdir we can find package.conf, ghc-asm, etc.
 
+
+Note [tooldir: How GHC finds mingw and perl on Windows]
+
+GHC has some custom logic on Windows for finding the mingw
+toolchain and perl. Depending on whether GHC is built
+with the make build system or Hadrian, and on whether we're
+running a bindist, we might find the mingw toolchain and perl
+either under $topdir/../{mingw, perl}/ or
+$topdir/../../{mingw, perl}/.
+
 -}
 
 -- | Expand occurrences of the @$topdir@ interpolation in a string.
 expandTopDir :: FilePath -> String -> String
-expandTopDir top_dir str
-  | Just str' <- stripPrefix "$topdir" str
+expandTopDir = expandPathVar "topdir"
+
+-- | Expand occurrences of the @$tooldir@ interpolation in a string
+-- on Windows, leave the string untouched otherwise.
+expandToolDir :: Maybe FilePath -> String -> String
+#if defined(mingw32_HOST_OS)
+expandToolDir (Just tool_dir) s = expandPathVar "tooldir" tool_dir s
+expandToolDir Nothing         _ = panic "Could not determine $tooldir"
+#else
+expandToolDir _ s = s
+#endif
+
+-- | @expandPathVar var value str@
+--
+--   replaces occurences of variable @$var@ with @value@ in str.
+expandPathVar :: String -> FilePath -> String -> String
+expandPathVar var value str
+  | Just str' <- stripPrefix ('$':var) str
   , null str' || isPathSeparator (head str')
-  = top_dir ++ expandTopDir top_dir str'
-expandTopDir top_dir (x:xs) = x : expandTopDir top_dir xs
-expandTopDir _ [] = []
+  = value ++ expandPathVar var value str'
+expandPathVar var value (x:xs) = x : expandPathVar var value xs
+expandPathVar _ _ [] = []
 
 -- | Returns a Unix-format path pointing to TopDir.
 findTopDir :: Maybe String -- Maybe TopDir path (without the '-B' prefix).
@@ -111,7 +135,7 @@ getBaseDir = try_size 2048 -- plenty, PATH_MAX is 512 under Win32.
           _ | ret < size -> do
                 path <- peekCWString buf
                 real <- getFinalPath path -- try to resolve symlinks paths
-                let libdir = (rootDir . sanitize . maybe path id) real
+                let libdir = (buildLibDir . sanitize . maybe path id) real
                 exists <- doesDirectoryExist libdir
                 if exists
                    then return $ Just libdir
@@ -126,19 +150,11 @@ getBaseDir = try_size 2048 -- plenty, PATH_MAX is 512 under Win32.
                     then drop 4 s
                     else s
 
-    rootDir s = case splitFileName $ normalise s of
-                (d, ghc_exe)
-                 | lower ghc_exe `elem` ["ghc.exe",
-                                         "ghc-stage1.exe",
-                                         "ghc-stage2.exe",
-                                         "ghc-stage3.exe"] ->
-                    case splitFileName $ takeDirectory d of
-                    -- ghc is in $topdir/bin/ghc.exe
-                    (d', _) -> takeDirectory d' </> "lib"
-                _ -> fail s
+    buildLibDir :: FilePath -> FilePath
+    buildLibDir s =
+      (takeDirectory . takeDirectory . normalise $ s) </> "lib"
 
     fail s = panic ("can't decompose ghc.exe path: " ++ show s)
-    lower = map toLower
 
 foreign import WINDOWS_CCONV unsafe "windows.h GetModuleFileNameW"
   c_GetModuleFileName :: Ptr () -> CWString -> Word32 -> IO Word32
@@ -205,4 +221,27 @@ foreign import WINDOWS_CCONV unsafe "dynamic"
 getBaseDir = Just . (\p -> p </> "lib") . takeDirectory . takeDirectory <$> getExecutablePath
 #else
 getBaseDir = return Nothing
+#endif
+
+-- See Note [tooldir: How GHC finds mingw and perl on Windows]
+-- Returns @Nothing@ when not on Windows.
+-- When called on Windows, it either throws an error when the
+-- tooldir can't be located, or returns @Just tooldirpath@.
+findToolDir
+  :: FilePath -- ^ topdir
+  -> IO (Maybe FilePath)
+#if defined(mingw32_HOST_OS)
+findToolDir top_dir = go 0 (top_dir </> "..")
+  where maxDepth = 2
+        go :: Int -> FilePath -> IO (Maybe FilePath)
+        go k path
+          | k == maxDepth = throwGhcExceptionIO $
+              InstallationError "could not detect mingw toolchain"
+          | otherwise = do
+              oneLevel <- doesDirectoryExist (path </> "mingw")
+              if oneLevel
+                then return (Just path)
+                else go (k+1) (path </> "..")
+#else
+findToolDir _ = return Nothing
 #endif

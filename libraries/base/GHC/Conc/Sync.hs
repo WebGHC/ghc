@@ -105,6 +105,7 @@ import Data.Maybe
 import GHC.Base
 import {-# SOURCE #-} GHC.IO.Handle ( hFlush )
 import {-# SOURCE #-} GHC.IO.Handle.FD ( stdout )
+import GHC.Int
 import GHC.IO
 import GHC.IO.Encoding.UTF8
 import GHC.IO.Exception
@@ -194,18 +195,16 @@ instance Ord ThreadId where
 --
 -- @since 4.8.0.0
 setAllocationCounter :: Int64 -> IO ()
-setAllocationCounter i = do
-  ThreadId t <- myThreadId
-  rts_setThreadAllocationCounter t i
+setAllocationCounter (I64# i) = IO $ \s ->
+  case setThreadAllocationCounter# i s of s' -> (# s', () #)
 
 -- | Return the current value of the allocation counter for the
 -- current thread.
 --
 -- @since 4.8.0.0
 getAllocationCounter :: IO Int64
-getAllocationCounter = do
-  ThreadId t <- myThreadId
-  rts_getThreadAllocationCounter t
+getAllocationCounter = IO $ \s ->
+  case getThreadAllocationCounter# s of (# s', ctr #) -> (# s', I64# ctr #)
 
 -- | Enables the allocation counter to be treated as a limit for the
 -- current thread.  When the allocation limit is enabled, if the
@@ -241,16 +240,6 @@ disableAllocationLimit :: IO ()
 disableAllocationLimit = do
   ThreadId t <- myThreadId
   rts_disableThreadAllocationLimit t
-
--- We cannot do these operations safely on another thread, because on
--- a 32-bit machine we cannot do atomic operations on a 64-bit value.
--- Therefore, we only expose APIs that allow getting and setting the
--- limit of the current thread.
-foreign import ccall unsafe "rts_setThreadAllocationCounter"
-  rts_setThreadAllocationCounter :: ThreadId# -> Int64 -> IO ()
-
-foreign import ccall unsafe "rts_getThreadAllocationCounter"
-  rts_getThreadAllocationCounter :: ThreadId# -> IO Int64
 
 foreign import ccall unsafe "rts_enableThreadAllocationLimit"
   rts_enableThreadAllocationLimit :: ThreadId# -> IO ()
@@ -558,7 +547,10 @@ data BlockReason
         -- ^blocked on some other resource.  Without @-threaded@,
         -- I\/O and 'threadDelay' show up as 'BlockedOnOther', with @-threaded@
         -- they show up as 'BlockedOnMVar'.
-  deriving (Eq,Ord,Show)
+  deriving ( Eq   -- ^ @since 4.3.0.0
+           , Ord  -- ^ @since 4.3.0.0
+           , Show -- ^ @since 4.3.0.0
+           )
 
 -- | The current status of a thread
 data ThreadStatus
@@ -570,7 +562,10 @@ data ThreadStatus
         -- ^the thread is blocked on some resource
   | ThreadDied
         -- ^the thread received an uncaught exception
-  deriving (Eq,Ord,Show)
+  deriving ( Eq   -- ^ @since 4.3.0.0
+           , Ord  -- ^ @since 4.3.0.0
+           , Show -- ^ @since 4.3.0.0
+           )
 
 threadStatus :: ThreadId -> IO ThreadStatus
 threadStatus (ThreadId t) = IO $ \s ->
@@ -781,6 +776,18 @@ catchSTM (STM m) handler = STM $ catchSTM# m handler'
       handler' e = case fromException e of
                      Just e' -> unSTM (handler e')
                      Nothing -> raiseIO# e
+
+-- Invariant checking has been removed. See #14324 and
+-- https://github.com/ghc-proposals/ghc-proposals/blob/master/proposals/0011-deprecate-stm-invariants.rst
+{-# DEPRECATED checkInv, always, alwaysSucceeds
+    [ "The STM invariant-checking mechanism is deprecated in GHC 8.4"
+    , "and will be removed in GHC 8.10. See "
+    , "<https://github.com/ghc-proposals/ghc-proposals/blob/master/proposals/0011-deprecate-stm-invariants.rst>."
+    , ""
+    , "Existing users are encouraged to encapsulate their STM"
+    , "operations in safe abstractions which can perform the invariant"
+    , "checking without help from the runtime system."
+    ] #-}
 
 -- | Low-level primitive on which 'always' and 'alwaysSucceeds' are built.
 -- 'checkInv' differs from these in that,

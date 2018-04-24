@@ -258,7 +258,7 @@ test('T13468',
      normal,
      run_command,
      ['$MAKE -s --no-print-directory T13468'])
-test('T13543', normal, compile, ['-ddump-str-signatures'])
+test('T13543', only_ways(['optasm']), compile, ['-ddump-str-signatures'])
 test('T11272',
      normal,
      run_command,
@@ -268,6 +268,12 @@ test('T12600',
      run_command,
      ['$MAKE -s --no-print-directory T12600'])
 test('T13658',
+     [when((arch('powerpc64') or arch('powerpc64le')), expect_broken(11261))],
+     compile, ['-dcore-lint'])
+test('T14779a',
+     [when((arch('powerpc64') or arch('powerpc64le')), expect_broken(11261))],
+     compile, ['-dcore-lint'])
+test('T14779b',
      [when((arch('powerpc64') or arch('powerpc64le')), expect_broken(11261))],
      compile, ['-dcore-lint'])
 test('T13708', normal, compile, [''])
@@ -285,5 +291,16 @@ test('T14140',
 test('T14272', normal, compile, [''])
 test('T14270a', normal, compile, [''])
 test('T14152', [ only_ways(['optasm']), check_errmsg(r'dead code') ], compile, ['-ddump-simpl'])
-test('T14152a', [ only_ways(['optasm']), check_errmsg(r'dead code') ], compile, ['-fno-exitification -ddump-simpl'])
+test('T14152a', [extra_files(['T14152.hs']), pre_cmd('cp T14152.hs T14152a.hs'),
+                 only_ways(['optasm']), check_errmsg(r'dead code') ],
+                compile, ['-fno-exitification -ddump-simpl'])
 test('T13990', normal, compile, ['-dcore-lint -O'])
+test('T14650', normal, compile, ['-O2'])
+test('T14959', normal, compile, ['-O'])
+test('T14978',
+     normal,
+     run_command,
+     ['$MAKE -s --no-print-directory T14978'])
+test('T15002', [ req_profiling ], compile, ['-O -fprof-auto -prof'])
+test('T15005', normal, compile, ['-O'])
+test('T15056', [extra_files(['T15056a.hs'])], multimod_compile, ['T15056', '-O -v0 -ddump-rule-firings'])

@@ -379,20 +379,20 @@ orphNamesOfCo (AxiomInstCo con _ cos) = orphNamesOfCoCon con `unionNameSet` orph
 orphNamesOfCo (UnivCo p _ t1 t2)    = orphNamesOfProv p `unionNameSet` orphNamesOfType t1 `unionNameSet` orphNamesOfType t2
 orphNamesOfCo (SymCo co)            = orphNamesOfCo co
 orphNamesOfCo (TransCo co1 co2)     = orphNamesOfCo co1 `unionNameSet` orphNamesOfCo co2
-orphNamesOfCo (NthCo _ co)          = orphNamesOfCo co
+orphNamesOfCo (NthCo _ _ co)        = orphNamesOfCo co
 orphNamesOfCo (LRCo  _ co)          = orphNamesOfCo co
 orphNamesOfCo (InstCo co arg)       = orphNamesOfCo co `unionNameSet` orphNamesOfCo arg
 orphNamesOfCo (CoherenceCo co1 co2) = orphNamesOfCo co1 `unionNameSet` orphNamesOfCo co2
 orphNamesOfCo (KindCo co)           = orphNamesOfCo co
 orphNamesOfCo (SubCo co)            = orphNamesOfCo co
 orphNamesOfCo (AxiomRuleCo _ cs)    = orphNamesOfCos cs
+orphNamesOfCo (HoleCo _)            = emptyNameSet
 
 orphNamesOfProv :: UnivCoProvenance -> NameSet
 orphNamesOfProv UnsafeCoerceProv    = emptyNameSet
 orphNamesOfProv (PhantomProv co)    = orphNamesOfCo co
 orphNamesOfProv (ProofIrrelProv co) = orphNamesOfCo co
 orphNamesOfProv (PluginProv _)      = emptyNameSet
-orphNamesOfProv (HoleProv _)        = emptyNameSet
 
 orphNamesOfCos :: [Coercion] -> NameSet
 orphNamesOfCos = orphNamesOfThings orphNamesOfCo

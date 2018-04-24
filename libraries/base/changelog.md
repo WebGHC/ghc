@@ -1,7 +1,26 @@
 # Changelog for [`base` package](http://hackage.haskell.org/package/base)
 
+## 4.12.0.0 *TBA*
+  * Bundled with GHC *TBA*
+
+  * Move the module `Data.Functor.Contravariant` from the
+    `contravariant` package to `base`.
+
+  * `($!)` is now representation-polymorphic like `($)`.
+
+  * Add `Applicative` (for `K1`), `Semigroup` and `Monoid` instances in
+    `GHC.Generics`. (#14849)
+
+## 4.11.1.0 *TBA*
+  * Bundled with GHC 8.4.2
+
+  * Add the `readFieldHash` function to `GHC.Read` which behaves like
+    `readField`, but for a field that ends with a `#` symbol (#14918).
+
 ## 4.11.0.0 *TBA*
   * Bundled with GHC 8.4.1
+
+  * `System.IO.openTempFile` is now thread-safe on Windows.
 
   * Deprecated `GHC.Stats.GCStats` interface has been removed.
 
@@ -72,6 +91,21 @@
     stack traces will be generated on unhandled exceptions by the RTS.
 
   * `getExecutablePath` now resolves symlinks on Windows (#14483)
+
+  * Deprecated STM invariant checking primitives (`checkInv`, `always`, and
+    `alwaysSucceeds`) in `GHC.Conc.Sync` (#14324).
+
+  * Add a `FixIOException` data type to `Control.Exception.Base`, and change
+    `fixIO` to throw that instead of a `BlockedIndefinitelyOnMVar` exception
+    (#14356).
+
+## 4.10.1.0 *November 2017*
+  * Bundled with GHC 8.2.2
+
+  * The file locking primitives provided by `GHC.IO.Handle` now use
+    Linux open file descriptor locking if available.
+
+  * Fixed bottoming definition of `clearBit` for `Natural`
 
 ## 4.10.0.0 *July 2017*
   * Bundled with GHC 8.2.1

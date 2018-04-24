@@ -345,6 +345,10 @@ data Instr
         | BSF         Format Operand Reg -- bit scan forward
         | BSR         Format Operand Reg -- bit scan reverse
 
+    -- bit manipulation instructions
+        | PDEP        Format Operand Operand Reg -- [BMI2] deposit bits to   the specified mask
+        | PEXT        Format Operand Operand Reg -- [BMI2] extract bits from the specified mask
+
     -- prefetch
         | PREFETCH  PrefetchVariant Format Operand -- prefetch Variant, addr size, address to prefetch
                                         -- variant can be NTA, Lvl0, Lvl1, or Lvl2
@@ -463,6 +467,9 @@ x86_regUsageOfInstr platform instr
     POPCNT _ src dst -> mkRU (use_R src []) [dst]
     BSF    _ src dst -> mkRU (use_R src []) [dst]
     BSR    _ src dst -> mkRU (use_R src []) [dst]
+
+    PDEP   _ src mask dst -> mkRU (use_R src $ use_R mask []) [dst]
+    PEXT   _ src mask dst -> mkRU (use_R src $ use_R mask []) [dst]
 
     -- note: might be a better way to do this
     PREFETCH _  _ src -> mkRU (use_R src []) []
@@ -640,6 +647,8 @@ x86_patchRegsOfInstr instr env
     CLTD _              -> instr
 
     POPCNT fmt src dst -> POPCNT fmt (patchOp src) (env dst)
+    PDEP   fmt src mask dst -> PDEP   fmt (patchOp src) (patchOp mask) (env dst)
+    PEXT   fmt src mask dst -> PEXT   fmt (patchOp src) (patchOp mask) (env dst)
     BSF    fmt src dst -> BSF    fmt (patchOp src) (env dst)
     BSR    fmt src dst -> BSR    fmt (patchOp src) (env dst)
 
@@ -1017,14 +1026,26 @@ canShortcut _                    = Nothing
 -- The blockset helps avoid following cycles.
 shortcutJump :: (BlockId -> Maybe JumpDest) -> Instr -> Instr
 shortcutJump fn insn = shortcutJump' fn (setEmpty :: LabelSet) insn
-  where shortcutJump' fn seen insn@(JXX cc id) =
-          if setMember id seen then insn
-          else case fn id of
-                 Nothing                -> insn
-                 Just (DestBlockId id') -> shortcutJump' fn seen' (JXX cc id')
-                 Just (DestImm imm)     -> shortcutJump' fn seen' (JXX_GBL cc imm)
-               where seen' = setInsert id seen
-        shortcutJump' _ _ other = other
+  where
+    shortcutJump' :: (BlockId -> Maybe JumpDest) -> LabelSet -> Instr -> Instr
+    shortcutJump' fn seen insn@(JXX cc id) =
+        if setMember id seen then insn
+        else case fn id of
+            Nothing                -> insn
+            Just (DestBlockId id') -> shortcutJump' fn seen' (JXX cc id')
+            Just (DestImm imm)     -> shortcutJump' fn seen' (JXX_GBL cc imm)
+        where seen' = setInsert id seen
+    shortcutJump' fn _ (JMP_TBL addr blocks section tblId) =
+        let updateBlock Nothing     = Nothing
+            updateBlock (Just bid)  =
+                case fn bid of
+                    Nothing                 -> Just bid
+                    Just (DestBlockId bid') -> Just bid'
+                    Just (DestImm _)        ->
+                        panic "Can't shortcut jump table to immediate"
+            blocks' = map updateBlock blocks
+        in  JMP_TBL addr blocks' section tblId
+    shortcutJump' _ _ other = other
 
 -- Here because it knows about JumpDest
 shortcutStatics :: (BlockId -> Maybe JumpDest) -> (Alignment, CmmStatics) -> (Alignment, CmmStatics)

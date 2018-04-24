@@ -24,6 +24,10 @@ source_suffix = '.rst'
 source_encoding = 'utf-8-sig'
 master_doc = 'index'
 
+rst_prolog = """
+.. |llvm-version| replace:: {llvm_version}
+""".format(llvm_version=ghc_config.llvm_version)
+
 # General information about the project.
 project = u'Glasgow Haskell Compiler'
 copyright = u'2015, GHC Team'
@@ -52,6 +56,9 @@ html_static_path = ['images']
 html_use_smartypants = True
 html_use_opensearch = 'https://downloads.haskell.org/~ghc/master/users-guide'
 html_show_copyright = True
+
+# See GHC #15006
+mathjax_path = 'https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.0/MathJax.js'
 
 # If true, an OpenSearch description file will be output, and all pages will
 # contain a <link> tag referring to it.  The value of this option must be the

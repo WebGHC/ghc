@@ -284,21 +284,21 @@ for an unboxed sum type with N alternatives is ::
 
     (# t_1 | t_2 | ... | t_N #)
 
-where `t_1` ... `t_N` are types (which can be unlifted, including unboxed tuple
-and sums).
+where ``t_1`` ... ``t_N`` are types (which can be unlifted, including unboxed
+tuples and sums).
 
 Unboxed tuples can be used for multi-arity alternatives. For example: ::
 
     (# (# Int, String #) | Bool #)
 
-Term level syntax is similar. Leading and preceding bars (`|`) indicate which
-alternative it is. Here is two terms of the type shown above: ::
+The term level syntax is similar. Leading and preceding bars (`|`) indicate which
+alternative it is. Here are two terms of the type shown above: ::
 
     (# (# 1, "foo" #) | #) -- first alternative
 
     (# | True #) -- second alternative
 
-Pattern syntax reflects the term syntax: ::
+The pattern syntax reflects the term syntax: ::
 
     case x of
       (# (# i, str #) | #) -> ...
@@ -307,45 +307,56 @@ Pattern syntax reflects the term syntax: ::
 Unboxed sums are "unboxed" in the sense that, instead of allocating sums in the
 heap and representing values as pointers, unboxed sums are represented as their
 components, just like unboxed tuples. These "components" depend on alternatives
-of a sum type. Code generator tries to generate as compact layout as possible.
-In the best case, size of an unboxed sum is size of its biggest alternative +
-one word (for tag). The algorithm for generating memory layout for a sum type
-works like this:
+of a sum type. Like unboxed tuples, unboxed sums are lazy in their lifted
+components.
+
+The code generator tries to generate as compact layout as possible for each
+unboxed sum. In the best case, size of an unboxed sum is size of its biggest
+alternative plus one word (for a tag). The algorithm for generating the memory
+layout for a sum type works like this:
 
 - All types are classified as one of these classes: 32bit word, 64bit word,
   32bit float, 64bit float, pointer.
 
 - For each alternative of the sum type, a layout that consists of these fields
-  is generated. For example, if an alternative has `Int`, `Float#` and `String`
-  fields, the layout will have an 32bit word, 32bit float and pointer fields.
+  is generated. For example, if an alternative has ``Int``, ``Float#`` and
+  ``String`` fields, the layout will have an 32bit word, 32bit float and
+  pointer fields.
 
 - Layout fields are then overlapped so that the final layout will be as compact
-  as possible. E.g. say two alternatives have these fields: ::
+  as possible. For example, suppose we have the unboxed sum: ::
 
-    Word32, String, Float#
-    Float#, Float#, Maybe Int
+    (# (# Word32#, String, Float# #)
+    |  (# Float#, Float#, Maybe Int #) #)
 
-  Final layout will be something like ::
+  The final layout will be something like ::
 
     Int32, Float32, Float32, Word32, Pointer
 
-  First `Int32` is for the tag. It has two `Float32` fields because floating
-  point types can't overlap with other types, because of limitations of the code
-  generator that we're hoping to overcome in the future, and second alternative
-  needs two `Float32` fields. `Word32` field is for the `Word32` in the first
-  alternative. `Pointer` field is shared between `String` and `Maybe Int` values
-  of the alternatives.
+  The first ``Int32`` is for the tag. There are two ``Float32`` fields because
+  floating point types can't overlap with other types, because of limitations of
+  the code generator that we're hoping to overcome in the future. The second
+  alternative needs two ``Float32`` fields: The ``Word32`` field is for the
+  ``Word32#`` in the first alternative. The ``Pointer`` field is shared between
+  ``String`` and ``Maybe Int`` values of the alternatives.
 
-  In the case of enumeration types (like `Bool`), the unboxed sum layout only
-  has an `Int32` field (i.e. the whole thing is represented by an integer).
-
-In the example above, a value of this type is thus represented as 5 values. As
-an another example, this is the layout for unboxed version of `Maybe a` type: ::
+  As another example, this is the layout for the unboxed version of ``Maybe a``
+  type, ``(# (# #) | a #)``: ::
 
     Int32, Pointer
 
-The `Pointer` field is not used when tag says that it's `Nothing`. Otherwise
-`Pointer` points to the value in `Just`.
+  The ``Pointer`` field is not used when tag says that it's ``Nothing``.
+  Otherwise ``Pointer`` points to the value in ``Just``. As mentioned
+  above, this type is lazy in its lifted field. Therefore, the type ::
+
+    data Maybe' a = Maybe' (# (# #) | a #)
+
+  is *precisely* isomorphic to the type ``Maybe a``, although its memory
+  representation is different.
+
+  In the degenerate case where all the alternatives have zero width, such
+  as the ``Bool``-like ``(# (# #) | (# #) #)``, the unboxed sum layout only
+  has an ``Int32`` tag field (i.e., the whole thing is represented by an integer).
 
 .. _syntax-extns:
 
@@ -514,11 +525,8 @@ instance, the binary integer literal ``0b11001001`` will be desugared into
 Hexadecimal floating point literals
 -----------------------------------
 
-.. ghc-flag:: -XHexFloatLiterals
+.. extension:: HexFloatLiterals
     :shortdesc: Enable support for :ref:`hexadecimal floating point literals <hex-float-literals>`.
-    :type: dynamic
-    :reverse: -XNoHexFloatLIterals
-    :category:
 
     :since: 8.4.1
 
@@ -552,6 +560,90 @@ by one bit left (negative) or right (positive).  Here are some examples:
 
 
 
+
+.. _numeric-underscores:
+
+Numeric underscores
+-------------------
+
+.. extension:: NumericUnderscores
+    :shortdesc: Enable support for :ref:`numeric underscores <numeric-underscores>`.
+
+    :since: 8.6.1
+
+    Allow the use of underscores in numeric literals.
+
+GHC allows for numeric literals to be given in decimal, octal, hexadecimal,
+binary, or float notation.
+
+The language extension :extension:`NumericUnderscores` adds support for expressing
+underscores in numeric literals.
+For instance, the numeric literal ``1_000_000`` will be parsed into
+``1000000`` when :extension:`NumericUnderscores` is enabled.
+That is, underscores in numeric literals are ignored when
+:extension:`NumericUnderscores` is enabled.
+See also :ghc-ticket:`14473`.
+
+For example: ::
+
+    -- decimal
+    million    = 1_000_000
+    billion    = 1_000_000_000
+    lightspeed = 299_792_458
+    version    = 8_04_1
+    date       = 2017_12_31
+
+    -- hexadecimal
+    red_mask = 0xff_00_00
+    size1G   = 0x3fff_ffff
+
+    -- binary
+    bit8th   = 0b01_0000_0000
+    packbits = 0b1_11_01_0000_0_111
+    bigbits  = 0b1100_1011__1110_1111__0101_0011
+
+    -- float
+    pi       = 3.141_592_653_589_793
+    faraday  = 96_485.332_89
+    avogadro = 6.022_140_857e+23
+
+    -- function
+    isUnderMillion = (< 1_000_000)
+
+    clip64M x
+        | x > 0x3ff_ffff = 0x3ff_ffff
+        | otherwise = x
+
+    test8bit x = (0b01_0000_0000 .&. x) /= 0
+
+About validity: ::
+
+    x0 = 1_000_000   -- valid
+    x1 = 1__000000   -- valid
+    x2 = 1000000_    -- invalid
+    x3 = _1000000    -- invalid
+
+    e0 = 0.0001      -- valid
+    e1 = 0.000_1     -- valid
+    e2 = 0_.0001     -- invalid
+    e3 = _0.0001     -- invalid
+    e4 = 0._0001     -- invalid
+    e5 = 0.0001_     -- invalid
+
+    f0 = 1e+23       -- valid
+    f1 = 1_e+23      -- valid
+    f2 = 1__e+23     -- valid
+    f3 = 1e_+23      -- invalid
+
+    g0 = 1e+23       -- valid
+    g1 = 1e+_23      -- invalid
+    g2 = 1e+23_      -- invalid
+
+    h0 = 0xffff      -- valid
+    h1 = 0xff_ff     -- valid
+    h2 = 0x_ffff     -- valid
+    h3 = 0x__ffff    -- valid
+    h4 = _0xffff     -- invalid
 
 .. _pattern-guards:
 
@@ -2010,6 +2102,104 @@ In addition, with :extension:`PatternSynonyms` you can prefix the name of a
 data constructor in an import or export list with the keyword
 ``pattern``, to allow the import or export of a data constructor without
 its parent type constructor (see :ref:`patsyn-impexp`).
+
+.. _block-arguments:
+
+More liberal syntax for function arguments
+------------------------------------------
+
+.. extension:: BlockArguments
+    :shortdesc: Allow ``do`` blocks and other constructs as function arguments.
+
+    :since: 8.6.1
+
+    Allow ``do`` expressions, lambda expressions, etc. to be directly used as
+    a function argument.
+
+In Haskell 2010, certain kinds of expressions can be used without parentheses
+as an argument to an operator, but not as an argument to a function.
+They include ``do``, lambda, ``if``, ``case``, and ``let``
+expressions. Some GHC extensions also define language constructs of this type:
+``mdo`` (:ref:`recursive-do-notation`), ``\case`` (:ref:`lambda-case`), and
+``proc`` (:ref:`arrow-notation`).
+
+The :extension:`BlockArguments` extension allows these constructs to be directly
+used as a function argument. For example::
+
+    when (x > 0) do
+      print x
+      exitFailure
+
+will be parsed as::
+
+    when (x > 0) (do
+      print x
+      exitFailure)
+
+and
+
+::
+
+    withForeignPtr fptr \ptr -> c_memcpy buf ptr size
+
+will be parsed as::
+
+    withForeignPtr fptr (\ptr -> c_memcpy buf ptr size)
+
+Changes to the grammar
+~~~~~~~~~~~~~~~~~~~~~~
+
+The Haskell report `defines
+<https://www.haskell.org/onlinereport/haskell2010/haskellch3.html#x8-220003>`_
+the ``lexp`` nonterminal thus (``*`` indicates a rule of interest)::
+
+    lexp  →  \ apat1 … apatn -> exp            (lambda abstraction, n ≥ 1)  *
+          |  let decls in exp                  (let expression)             *
+          |  if exp [;] then exp [;] else exp  (conditional)                *
+          |  case exp of { alts }              (case expression)            *
+          |  do { stmts }                      (do expression)              *
+          |  fexp
+
+    fexp  →  [fexp] aexp                       (function application)
+
+    aexp  →  qvar                              (variable)
+          |  gcon                              (general constructor)
+          |  literal
+          |  ( exp )                           (parenthesized expression)
+          |  qcon { fbind1 … fbindn }          (labeled construction)
+          |  aexp { fbind1 … fbindn }          (labelled update)
+          |  …
+
+The :extension:`BlockArguments` extension moves these production rules under
+``aexp``::
+
+    lexp  →  fexp
+
+    fexp  →  [fexp] aexp                       (function application)
+
+    aexp  →  qvar                              (variable)
+          |  gcon                              (general constructor)
+          |  literal
+          |  ( exp )                           (parenthesized expression)
+          |  qcon { fbind1 … fbindn }          (labeled construction)
+          |  aexp { fbind1 … fbindn }          (labelled update)
+          |  \ apat1 … apatn -> exp            (lambda abstraction, n ≥ 1)  *
+          |  let decls in exp                  (let expression)             *
+          |  if exp [;] then exp [;] else exp  (conditional)                *
+          |  case exp of { alts }              (case expression)            *
+          |  do { stmts }                      (do expression)              *
+          |  …
+
+Now the ``lexp`` nonterminal is redundant and can be dropped from the grammar.
+
+Note that this change relies on an existing meta-rule to resolve ambiguities:
+
+    The grammar is ambiguous regarding the extent of lambda abstractions, let
+    expressions, and conditionals. The ambiguity is resolved by the meta-rule
+    that each of these constructs extends as far to the right as possible.
+
+For example, ``f \a -> a b`` will be parsed as ``f (\a -> a b)``, not as ``f
+(\a -> a) b``.
 
 .. _syntax-stolen:
 
@@ -3583,7 +3773,7 @@ declaration, to generate a standard instance declaration for specified class.
 GHC extends this mechanism along several axes:
 
 * The derivation mechanism can be used separtely from the data type
-  declaration, using the the `standalone deriving mechanism
+  declaration, using the `standalone deriving mechanism
   <#stand-alone-deriving>`__.
 
 * In Haskell 98, the only derivable classes are ``Eq``,
@@ -3712,10 +3902,20 @@ number of important ways:
    module as the data type declaration. (But be aware of the dangers of
    orphan instances (:ref:`orphan-modules`).
 
--  You must supply an explicit context (in the example the context is
-   ``(Eq a)``), exactly as you would in an ordinary instance
+-  In most cases, you must supply an explicit context (in the example the
+   context is ``(Eq a)``), exactly as you would in an ordinary instance
    declaration. (In contrast, in a ``deriving`` clause attached to a
    data type declaration, the context is inferred.)
+
+   The exception to this rule is that the context of a standalone deriving
+   declaration can infer its context when a single, extra-wildcards constraint
+   is used as the context, such as in: ::
+
+         deriving instance _ => Eq (Foo a)
+
+   This is essentially the same as if you had written ``deriving Foo`` after
+   the declaration for ``data Foo a``. Using this feature requires the use of
+   :extension:`PartialTypeSignatures` (:ref:`partial-type-signatures`).
 
 -  Unlike a ``deriving`` declaration attached to a ``data`` declaration,
    the instance can be more specific than the data type (assuming you
@@ -4390,7 +4590,7 @@ Generalised derived instances for newtypes
                GeneralizedNewtypeDeriving
     :shortdesc: Enable newtype deriving.
 
-    :since: 6.8.1
+    :since: 6.8.1. British spelling since 8.6.1.
 
     Enable GHC's cunning generalised deriving mechanism for ``newtype``\s
 
@@ -4959,7 +5159,7 @@ Pattern synonyms
 
 Pattern synonyms are enabled by the language extension :extension:`PatternSynonyms`, which is
 required for defining them, but *not* for using them. More information and
-examples of view patterns can be found on the `Wiki page <PatternSynonyms>`.
+examples of pattern synonyms can be found on the :ghc-wiki:`Wiki page <PatternSynonyms>`.
 
 Pattern synonyms enable giving names to parametrized pattern schemes.
 They can also be thought of as abstract constructors that don't have a
@@ -5297,6 +5497,8 @@ Note also the following points
 
      P :: () => CProv => t1 -> t2 -> .. -> tN -> t
 
+-  The GHCi :ghci-cmd:`:info` command shows pattern types in this format.
+
 -  You may specify an explicit *pattern signature*, as we did for
    ``ExNumPat`` above, to specify the type of a pattern, just as you can
    for a function. As usual, the type signature can be less polymorphic
@@ -5313,7 +5515,21 @@ Note also the following points
          pattern Left' x  = Left x
          pattern Right' x = Right x
 
--  The GHCi :ghci-cmd:`:info` command shows pattern types in this format.
+-  The rules for lexically-scoped type variables (see
+   :ref:`scoped-type-variables`) apply to pattern-synonym signatures.
+   As those rules specify, only the type variables from an explicit,
+   syntactically-visible outer `forall` (the universals) scope over
+   the definition of the pattern synonym; the existentials, bound by
+   the inner forall, do not.  For example ::
+
+         data T a where
+            MkT :: Bool -> b -> (b->Int) -> a -> T a
+
+         pattern P :: forall a. forall b. b -> (b->Int) -> a -> T a
+         pattern P x y v <- MkT True x y (v::a)
+
+   Here the universal type variable `a` scopes over the definition of `P`,
+   but the existential `b` does not.  (c.f. disussion on Trac #14998.)
 
 -  For a bidirectional pattern synonym, a use of the pattern synonym as
    an expression has the type
@@ -5374,6 +5590,24 @@ Matching of pattern synonyms
 
 A pattern synonym occurrence in a pattern is evaluated by first matching
 against the pattern synonym itself, and then on the argument patterns.
+
+More precisely, the semantics of pattern matching is given in
+`Section 3.17 of the Haskell 2010 report <https://www.haskell.org/onlinereport/haskell2010/haskellch3.html#x8-580003.17>`__.   To the informal semantics in Section 3.17.2 we add this extra rule:
+
+* If the pattern is a constructor pattern ``(P p1 ... pn)``, where ``P`` is
+  a pattern synonym defined by ``P x1 ... xn = p`` or ``P x1 ... xn <- p``, then:
+
+  (a) Match the value ``v`` against ``p``. If this match fails or diverges,
+      so does the whole (pattern synonym) match.   Otherwise the match
+      against ``p`` must bind the variables ``x1 ... xn``; let them be bound to values ``v1 ... vn``.
+
+  (b) Match ``v1`` against ``p1``, ``v2`` against ``p2`` and so on.
+      If any of these matches fail or diverge, so does the whole match.
+
+  (c) If all the matches against the ``pi`` succeed, the match succeeds,
+      binding the variables bound by the ``pi`` . (The ``xi`` are not
+      bound; they remain local to the pattern synonym declaration.)
+
 For example, in the following program, ``f`` and ``f'`` are equivalent: ::
 
     pattern Pair x y <- [x, y]
@@ -6310,7 +6544,7 @@ Overlapping instances
 
 In general, as discussed in :ref:`instance-resolution`, *GHC requires
 that it be unambiguous which instance declaration should be used to
-resolve a type-class constraint*. GHC also provides a way to to loosen
+resolve a type-class constraint*. GHC also provides a way to loosen
 the instance resolution, by allowing more than one instance to match,
 *provided there is a most specific one*. Moreover, it can be loosened
 further, by allowing more than one instance to match irrespective of
@@ -7227,7 +7461,7 @@ defaults to ``*`` if omitted. An example is ::
 Parameters can also be given explicit kind signatures if needed. We call
 the number of parameters in a type family declaration, the family's
 arity, and all applications of a type family must be fully saturated
-with respect to to that arity. This requirement is unlike ordinary type synonyms
+with respect to that arity. This requirement is unlike ordinary type synonyms
 and it implies that the kind of a type family is not sufficient to
 determine a family's arity, and hence in general, also insufficient to
 determine whether a type family application is well formed. As an
@@ -8401,7 +8635,8 @@ Principles of kind inference
 
 Generally speaking, when :extension:`PolyKinds` is on, GHC tries to infer the
 most general kind for a declaration.
-In this case the definition has a right-hand side to inform kind
+In many cases (for example, in a datatype declaration)
+the definition has a right-hand side to inform kind
 inference. But that is not always the case. Consider ::
 
     type family F a
@@ -8836,6 +9071,30 @@ system does not have principal types) or merely practical (inferring this
 dependency is hard, given GHC's implementation). So, GHC takes the easy
 way out and requires a little help from the user.
 
+Inferring dependency in user-written ``forall``\s
+-------------------------------------------------
+
+A programmer may use ``forall`` in a type to introduce new quantified type
+variables. These variables may depend on each other, even in the same
+``forall``. However, GHC requires that the dependency be inferrable from
+the body of the ``forall``. Here are some examples::
+
+  data Proxy k (a :: k) = MkProxy   -- just to use below
+  
+  f :: forall k a. Proxy k a        -- This is just fine. We see that (a :: k).
+  f = undefined
+
+  g :: Proxy k a -> ()              -- This is to use below.
+  g = undefined
+
+  data Sing a
+  h :: forall k a. Sing k -> Sing a -> ()  -- No obvious relationship between k and a
+  h _ _ = g (MkProxy :: Proxy k a)  -- This fails. We didn't know that a should have kind k.
+
+Note that in the last example, it's impossible to learn that ``a`` depends on ``k`` in the
+body of the ``forall`` (that is, the ``Sing k -> Sing a -> ()``). And so GHC rejects
+the program.
+
 Kind defaulting without :extension:`PolyKinds`
 -----------------------------------------------
 
@@ -9230,7 +9489,7 @@ The following things have kind ``Constraint``:
 -  Anything whose form is not yet known, but the user has declared to
    have kind ``Constraint`` (for which they need to import it from
    ``GHC.Exts``). So for example
-   ``type Foo (f :: \* -> Constraint) = forall b. f b => b -> b``
+   ``type Foo (f :: * -> Constraint) = forall b. f b => b -> b``
    is allowed, as well as examples involving type families: ::
 
        type family Typ a b :: Constraint
@@ -9633,6 +9892,26 @@ This only happens if:
    This program will be rejected, because "``a``" does not scope over
    the definition of "``g``", so "``x::a``" means "``x::forall a. a``"
    by Haskell's usual implicit quantification rules.
+
+-  The type variable is quantified by the single, syntactically visible,
+   outermost ``forall`` of the type signature. For example, GHC will reject
+   all of the following examples: ::
+
+         f1 :: forall a. forall b. a -> [b] -> [b]
+         f1 _ (x:xs) = xs ++ [ x :: b ]
+
+         f2 :: forall a. a -> forall b. [b] -> [b]
+         f2 _ (x:xs) = xs ++ [ x :: b ]
+
+         type Foo = forall b. [b] -> [b]
+
+         f3 :: Foo
+         f3 (x:xs) = xs ++ [ x :: b ]
+
+   In ``f1`` and ``f2``, the type variable ``b`` is not quantified by the
+   outermost ``forall``, so it is not in scope over the bodies of the
+   functions. Neither is ``b`` in scope over the body of ``f3``, as the
+   ``forall`` is tucked underneath the ``Foo`` type synonym.
 
 -  The signature gives a type for a function binding or a bare variable
    binding, not a pattern binding. For example: ::
@@ -10546,7 +10825,8 @@ written with a leading underscore (e.g., "``_``", "``_foo``",
 will generate an error message that describes which type is expected at
 the hole's location, information about the origin of any free type
 variables, and a list of local bindings that might help fill the hole
-with actual code. Typed holes are always enabled in GHC.
+and bindings in scope that fit the type of the hole that might help fill
+the hole with actual code. Typed holes are always enabled in GHC.
 
 The goal of typed holes is to help with writing Haskell code rather than
 to change the type system. Typed holes can be used to obtain extra
@@ -10568,11 +10848,15 @@ will fail with the following error: ::
         Found hole `_' with type: a
         Where: `a' is a rigid type variable bound by
                    the type signature for f :: a -> a at hole.hs:1:6
-        Relevant bindings include
-          f :: a -> a (bound at hole.hs:2:1)
-          x :: a (bound at hole.hs:2:3)
         In the expression: _
         In an equation for `f': f x = _
+        Relevant bindings include
+          x :: a (bound at hole.hs:2:3)
+          f :: a -> a (bound at hole.hs:2:1)
+        Valid substitutions include
+              undefined :: forall (a :: TYPE r). GHC.Stack.Types.HasCallStack => a
+                (imported from ‘Prelude’ at hole.hs:1:1
+                (and originally defined in ‘GHC.Err’))
 
 Here are some more details:
 
@@ -10609,13 +10893,36 @@ Here are some more details:
 
    .. code-block:: none
 
-       Foo.hs:5:15: error:
-           Found hole: _x :: Bool
-           Relevant bindings include
-             p :: Bool (bound at Foo.hs:3:6)
-             cons :: Bool -> [Bool] (bound at Foo.hs:3:1)
+       Foo.hs:3:21: error:
+          Found hole: _x :: Bool
+          Or perhaps ‘_x’ is mis-spelled, or not in scope
+          In the first argument of ‘(:)’, namely ‘_x’
+          In the second argument of ‘(:)’, namely ‘_x : y’
+          In the second argument of ‘(:)’, namely ‘True : _x : y’
+          Relevant bindings include
+            z :: Bool (bound at Foo.hs:3:6)
+          cons :: Bool -> [Bool] (bound at Foo.hs:3:1)
+          Valid substitutions include
+            otherwise :: Bool
+              (imported from ‘Prelude’ at Foo.hs:1:8-10
+              (and originally defined in ‘GHC.Base’))
+            False :: Bool
+              (imported from ‘Prelude’ at Foo.hs:1:8-10
+              (and originally defined in ‘GHC.Types’))
+            True :: Bool
+              (imported from ‘Prelude’ at Foo.hs:1:8-10
+              (and originally defined in ‘GHC.Types’))
+            maxBound :: forall a. Bounded a => a
+              (imported from ‘Prelude’ at Foo.hs:1:8-10
+              (and originally defined in ‘GHC.Enum’))
+            minBound :: forall a. Bounded a => a
+              (imported from ‘Prelude’ at Foo.hs:1:8-10
+              (and originally defined in ‘GHC.Enum’))
+            undefined :: forall (a :: TYPE r). GHC.Stack.Types.HasCallStack => a
+              (imported from ‘Prelude’ at Foo.hs:1:8-10
+              (and originally defined in ‘GHC.Err’))
 
-       Foo.hs:5:20: error:
+       Foo.hs:3:26: error:
            Variable not in scope: y :: [Bool]
 
    More information is given for explicit holes (i.e. ones that start
@@ -10633,24 +10940,38 @@ Here are some more details:
 
    .. code-block:: none
 
-       unbound.hs:1:8:
-           Found hole '_x' with type: a
-           Where: `a' is a rigid type variable bound by
-                      the inferred type of cons :: [a] at unbound.hs:1:1
-           Relevant bindings include cons :: [a] (bound at unbound.hs:1:1)
-           In the first argument of `(:)', namely `_x'
-           In the expression: _x : _x
-           In an equation for `cons': cons = _x : _x
+      unbound.hs:1:8:
+          Found hole '_x' with type: a
+          Where: `a' is a rigid type variable bound by
+                     the inferred type of cons :: [a] at unbound.hs:1:1
+          In the first argument of `(:)', namely `_x'
+          In the expression: _x : _x
+          In an equation for `cons': cons = _x : _x
+          Relevant bindings include cons :: [a] (bound at unbound.hs:1:1)
+          Valid substitutions include
+            undefined :: forall (a :: TYPE r). GHC.Stack.Types.HasCallStack => a
+            (imported from ‘Prelude’ at unbound.hs:1:8-11
+              (and originally defined in ‘GHC.Err’))
 
-       unbound.hs:1:13:
-           Found hole '_x' with type: [a]
-           Arising from: an undeclared identifier `_x' at unbound.hs:1:13-14
-           Where: `a' is a rigid type variable bound by
-                      the inferred type of cons :: [a] at unbound.hs:1:1
-           Relevant bindings include cons :: [a] (bound at unbound.hs:1:1)
-           In the second argument of `(:)', namely `_x'
-           In the expression: _x : _x
-           In an equation for `cons': cons = _x : _x
+      unbound.hs:1:13:
+          Found hole: _x :: [a]
+          Where: ‘a’ is a rigid type variable bound by
+                  the inferred type of cons :: [a]
+                  at unbound.hs:3:1-12
+          Or perhaps ‘_x’ is mis-spelled, or not in scope
+          In the second argument of ‘(:)’, namely ‘_x’
+          In the expression: _x : _x
+          In an equation for ‘cons’: cons = _x : _x
+          Relevant bindings include cons :: [a] (bound at unbound.hs:3:1)
+          Valid substitutions include
+            cons :: forall a. [a] (defined at unbound.hs:3:1)
+            mempty :: forall a. Monoid a => a
+              (imported from ‘Prelude’ at unbound.hs:1:8-11
+              (and originally defined in ‘GHC.Base’))
+            undefined :: forall (a :: TYPE r). GHC.Stack.Types.HasCallStack => a
+              (imported from ‘Prelude’ at unbound.hs:1:8-11
+              (and originally defined in ‘GHC.Err’))
+
 
    Notice the two different types reported for the two different
    occurrences of ``_x``.
@@ -10674,11 +10995,68 @@ Here are some more details:
    implementation terms, they are reported by the renamer rather than
    the type checker.)
 
-There's a flag for controlling the amount of context information shown for
-typed holes:
+- The list of valid substitutions is found by checking which bindings in scope
+  would fit into the hole. As an example, compiling the following module with
+  GHC: ::
+
+      import Data.List (inits)
+
+      g :: [String]
+      g = _ "hello, world"
+
+  yields the errors:
+
+
+  .. code-block:: none
+
+    • Found hole: _ :: [Char] -> [String]
+    • In the expression: _
+      In the expression: _ "hello, world"
+      In an equation for ‘f’: f = _ "hello, world"
+    • Relevant bindings include f :: [String] (bound at test.hs:6:1)
+      Valid substitutions include
+        lines :: String -> [String]
+          (imported from ‘Prelude’ at test.hs:1:8-11
+          (and originally defined in ‘base-4.11.0.0:Data.OldList’))
+        words :: String -> [String]
+          (imported from ‘Prelude’ at test.hs:1:8-11
+          (and originally defined in ‘base-4.11.0.0:Data.OldList’))
+        read :: forall a. Read a => String -> a
+          (imported from ‘Prelude’ at test.hs:1:8-11
+          (and originally defined in ‘Text.Read’))
+        inits :: forall a. [a] -> [[a]]
+          (imported from ‘Data.List’ at test.hs:3:19-23
+          (and originally defined in ‘base-4.11.0.0:Data.OldList’))
+        repeat :: forall a. a -> [a]
+          (imported from ‘Prelude’ at test.hs:1:8-11
+          (and originally defined in ‘GHC.List’))
+        mempty :: forall a. Monoid a => a
+          (imported from ‘Prelude’ at test.hs:1:8-11
+          (and originally defined in ‘GHC.Base’))
+        return :: forall (m :: * -> *). Monad m => forall a. a -> m a
+          (imported from ‘Prelude’ at test.hs:1:8-11
+          (and originally defined in ‘GHC.Base’))
+        pure :: forall (f :: * -> *). Applicative f => forall a. a -> f a
+          (imported from ‘Prelude’ at test.hs:1:8-11
+          (and originally defined in ‘GHC.Base’))
+        fail :: forall (m :: * -> *). Monad m => forall a. String -> m a
+          (imported from ‘Prelude’ at test.hs:1:8-11
+          (and originally defined in ‘GHC.Base’))
+        error :: forall (a :: TYPE r). GHC.Stack.Types.HasCallStack => [Char] -> a
+          (imported from ‘Prelude’ at test.hs:1:8-11
+          (and originally defined in ‘GHC.Err’))
+        errorWithoutStackTrace :: forall (a :: TYPE r). [Char] -> a
+          (imported from ‘Prelude’ at test.hs:1:8-11
+          (and originally defined in ‘GHC.Err’))
+        undefined :: forall (a :: TYPE r). GHC.Stack.Types.HasCallStack => a
+          (imported from ‘Prelude’ at test.hs:1:8-11
+          (and originally defined in ‘GHC.Err’))
+
+There are a few flags for controlling the amount of context information shown
+for typed holes:
 
 .. ghc-flag:: -fshow-hole-constraints
-    :shortdesc: Show constraints when reporting typed holes
+    :shortdesc: Show constraints when reporting typed holes.
     :type: dynamic
     :category: verbosity
 
@@ -10692,18 +11070,244 @@ typed holes:
 
     .. code-block:: none
 
-        show_constraints.hs:4:7: error:
-            • Found hole: _ :: Bool
-            • In the expression: _
-              In an equation for ‘f’: f x = _
-            • Relevant bindings include
-                x :: a (bound at show_constraints.hs:4:3)
-                f :: a -> Bool (bound at show_constraints.hs:4:1)
-              Constraints include
-                Eq a (from the type signature for:
-                             f :: Eq a => a -> Bool
-                      at show_constraints.hs:3:1-22)
+      show_constraints.hs:4:7: error:
+          • Found hole: _ :: Bool
+          • In the expression: _
+            In an equation for ‘f’: f x = _
+          • Relevant bindings include
+              x :: a (bound at show_constraints.hs:4:3)
+              f :: a -> Bool (bound at show_constraints.hs:4:1)
+            Constraints include Eq a (from show_constraints.hs:3:1-22)
+            Valid substitutions include
+              otherwise :: Bool
+                (imported from ‘Prelude’ at show_constraints.hs:1:8-11
+                (and originally defined in ‘GHC.Base’))
+              False :: Bool
+                (imported from ‘Prelude’ at show_constraints.hs:1:8-11
+                (and originally defined in ‘GHC.Types’))
+              True :: Bool
+                (imported from ‘Prelude’ at show_constraints.hs:1:8-11
+                (and originally defined in ‘GHC.Types’))
+              maxBound :: forall a. Bounded a => a
+                (imported from ‘Prelude’ at show_constraints.hs:1:8-11
+                (and originally defined in ‘GHC.Enum’))
+              minBound :: forall a. Bounded a => a
+                (imported from ‘Prelude’ at show_constraints.hs:1:8-11
+                (and originally defined in ‘GHC.Enum’))
+              undefined :: forall (a :: TYPE r). GHC.Stack.Types.HasCallStack => a
+                (imported from ‘Prelude’ at show_constraints.hs:1:8-11
+                (and originally defined in ‘GHC.Err’))
 
+.. _typed-hole-valid-substitutions:
+
+Valid Substitutions
+-------------------
+GHC sometimes suggests valid substitutions for typed holes, which is
+configurable by a few flags.
+
+.. ghc-flag:: -fno-show-valid-substitutions
+    :shortdesc: Disables showing a list of valid substitutions for typed holes
+        in type error messages.
+    :type: dynamic
+    :category: verbosity
+
+    :default: off
+
+    This flag can be toggled to turn off the display of valid substitutions
+    entirely.
+
+.. ghc-flag:: -fno-sort-valid-substitutions
+    :shortdesc: Disables the sorting of the list of valid substitutions for typed holes
+        in type error messages.
+    :type: dynamic
+    :category: verbosity
+
+    :default: off
+
+    By default the valid substitutions are sorted by a topological sort on the
+    subsumption graph of the identified substitutions. However, this requires
+    checking relations between the found substitutions, which can be expensive
+    if there are many valid substitutions. Sorting can be toggled off with this
+    flag.
+
+    When sorting is off, the hole in ``g`` in the following as before ::
+
+      import Data.List (inits)
+
+      g :: [String]
+      g = _ "hello, world"
+
+    will yield an error:
+
+    .. code-block:: none
+
+      test.hs:6:5: error:
+          • Found hole: _ :: [Char] -> [String]
+          • In the expression: _
+            In the expression: _ "hello, world"
+            In an equation for ‘g’: g = _ "hello, world"
+          • Relevant bindings include f :: [String] (bound at test.hs:6:1)
+            Valid substitutions include
+              inits :: forall a. [a] -> [[a]]
+                (imported from ‘Data.List’ at test.hs:3:19-23
+                (and originally defined in ‘base-4.11.0.0:Data.OldList’))
+              return :: forall (m :: * -> *). Monad m => forall a. a -> m a
+                (imported from ‘Prelude’ at test.hs:1:8-11
+                (and originally defined in ‘GHC.Base’))
+              fail :: forall (m :: * -> *). Monad m => forall a. String -> m a
+                (imported from ‘Prelude’ at test.hs:1:8-11
+                (and originally defined in ‘GHC.Base’))
+              mempty :: forall a. Monoid a => a
+                (imported from ‘Prelude’ at test.hs:1:8-11
+                (and originally defined in ‘GHC.Base’))
+              pure :: forall (f :: * -> *). Applicative f => forall a. a -> f a
+                (imported from ‘Prelude’ at test.hs:1:8-11
+                (and originally defined in ‘GHC.Base’))
+              read :: forall a. Read a => String -> a
+                (imported from ‘Prelude’ at test.hs:1:8-11
+                (and originally defined in ‘Text.Read’))
+              lines :: String -> [String]
+                (imported from ‘Prelude’ at test.hs:1:8-11
+                (and originally defined in ‘base-4.11.0.0:Data.OldList’))
+              words :: String -> [String]
+                (imported from ‘Prelude’ at test.hs:1:8-11
+                (and originally defined in ‘base-4.11.0.0:Data.OldList’))
+              error :: forall (a :: TYPE r). GHC.Stack.Types.HasCallStack => [Char] -> a
+                (imported from ‘Prelude’ at test.hs:1:8-11
+                (and originally defined in ‘GHC.Err’))
+              errorWithoutStackTrace :: forall (a :: TYPE r). [Char] -> a
+                (imported from ‘Prelude’ at test.hs:1:8-11
+                (and originally defined in ‘GHC.Err’))
+              undefined :: forall (a :: TYPE r). GHC.Stack.Types.HasCallStack => a
+                (imported from ‘Prelude’ at test.hs:1:8-11
+                (and originally defined in ‘GHC.Err’))
+              repeat :: forall a. a -> [a]
+                (imported from ‘Prelude’ at test.hs:1:8-11
+                (and originally defined in ‘GHC.List’))
+
+    where the substitutions are ordered by the order they were defined and
+    imported in, with all local bindings before global bindings.
+
+.. ghc-flag:: -fmax-valid-substitutions=⟨n⟩
+    :shortdesc: *default: 6.* Set the maximum number of valid substitutions for
+        typed holes to display in type error messages.
+    :type: dynamic
+    :reverse: -fno-max-valid-substitutions
+    :category: verbosity
+
+    :default: 6
+
+    The list of valid substitutions is limited by displaying up to 6
+    substitutions per hole. The number of substitutions shown can be set by this
+    flag. Turning the limit off with :ghc-flag:`-fno-max-valid-substitutions`
+    displays all found substitutions.
+
+.. ghc-flag:: -funclutter-valid-substitutions
+    :shortdesc: Unclutter the list of valid substitutions by not showing
+        provenance of suggestion.
+    :type: dynamic
+    :category: verbosity
+
+    :default: off
+
+    This flag can be toggled to decrease the verbosity of the valid
+    substitution suggestions by not showing the provenance the suggestions.
+
+.. _typed-holes-refinement-substitutions:
+
+Refinement Substitutions
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+When the flag :ghc-flag:`-frefinement-level-substitutions=⟨n⟩` is set to an
+``n`` larger than ``0``, GHC will offer up a list of valid refinement
+substitutions, which are valid substitutions that need up to ``n`` levels of
+additional refinement to be complete, where each level represents an additional
+hole in the substitution that requires filling in.  As an example, consider the
+hole in ::
+
+  f :: [Integer] -> Integer
+  f = _
+
+When the refinement level is not set, it will only offer valid substitutions
+suggestions: ::
+
+  Valid substitutions include
+    f :: [Integer] -> Integer
+    product :: forall (t :: * -> *).
+              Foldable t => forall a. Num a => t a -> a
+    sum :: forall (t :: * -> *).
+          Foldable t => forall a. Num a => t a -> a
+    maximum :: forall (t :: * -> *).
+              Foldable t => forall a. Ord a => t a -> a
+    minimum :: forall (t :: * -> *).
+              Foldable t => forall a. Ord a => t a -> a
+    head :: forall a. [a] -> a
+    (Some substitutions suppressed; use -fmax-valid-substitutions=N or -fno-max-valid-substitutions)
+
+However, with :ghc-flag:`-frefinement-level-substitutions=⟨n⟩` set to e.g. `1`,
+it will additionally offer up a list of refinement substitutions, in this case: ::
+
+  Valid refinement substitutions include
+    foldl1 _ :: forall (t :: * -> *).
+                Foldable t => forall a. (a -> a -> a) -> t a -> a
+    foldr1 _ :: forall (t :: * -> *).
+                Foldable t => forall a. (a -> a -> a) -> t a -> a
+    head _ :: forall a. [a] -> a
+    last _ :: forall a. [a] -> a
+    error _ :: forall (a :: TYPE r).
+                GHC.Stack.Types.HasCallStack => [Char] -> a
+    errorWithoutStackTrace _ :: forall (a :: TYPE r). [Char] -> a
+    (Some refinement substitutions suppressed;
+      use -fmax-refinement-substitutions=N or -fno-max-refinement-substitutions)
+
+Which shows that the hole could be replaced with e.g. ``foldl1 _``. While not
+fixing the hole, this can help users understand what options they have.
+
+.. ghc-flag:: -frefinement-level-substitutions=⟨n⟩
+    :shortdesc: *default: off.* Sets the level of refinement of the
+         refinement substitutions, where level ``n`` means that substitutions
+         of up to ``n`` holes will be considered.
+    :type: dynamic
+    :reverse: -fno-refinement-level-substitutions
+    :category: verbosity
+
+    :default: off
+
+    The list of valid refinement substitutions is generated by considering
+    substitutions with a varying amount of additional holes. The amount of
+    holes in a refinement can be set by this flag. If the flag is set to 0
+    or not set at all, no valid refinement substitutions will be suggested.
+
+.. ghc-flag:: -fabstract-refinement-substitutions
+    :shortdesc: *default: off.* Toggles whether refinements where one or more
+         or more of the holes are abstract are reported.
+    :type: dynamic
+    :reverse: -fno-abstract-refinement-substitutions
+    :category: verbosity
+
+    :default: off
+
+    Valid list of valid refinement substitutions can often grow large when
+    the refinement level is ``>= 2``, with holes like ``head _ _`` or
+    ``fst _ _``, which are valid refinements, but which are unlikely to be
+    relevant since one or more of the holes are still completely open, in that
+    neither the type nor kind of those holes are constrained by the proposed
+    identifier at all. By default, such holes are not reported. By turning this
+    flag on, such holes are included in the list of valid refinement substitutions.
+
+.. ghc-flag:: -fmax-refinement-substitutions=⟨n⟩
+    :shortdesc: *default: 6.* Set the maximum number of refinement substitutions
+         for typed holes to display in type error messages.
+    :type: dynamic
+    :reverse: -fno-max-refinement-substitutions
+    :category: verbosity
+
+    :default: 6
+
+    The list of valid refinement substitutions is limited by displaying up to 6
+    substitutions per hole. The number of substitutions shown can be set by this
+    flag. Turning the limit off with :ghc-flag:`-fno-max-refinement-substitutions`
+    displays all found substitutions.
 
 .. _partial-type-signatures:
 
@@ -10993,6 +11597,15 @@ Anonymous wildcards are also allowed in visible type applications
 argument to ``wurble``, then you can say ``wurble @_ @Int`` where the first
 argument is a wildcard.
 
+Standalone ``deriving`` declarations permit the use of a single,
+extra-constraints wildcard, like so: ::
+
+   deriving instance _ => Eq (Foo a)
+
+This denotes a derived ``Eq (Foo a)`` instance where the context is inferred,
+in much the same way that ordinary ``deriving`` clauses do. Any other use of
+wildcards in a standalone ``deriving`` declaration is prohibited.
+
 In all other contexts, type wildcards are disallowed, and a named wildcard is treated
 as an ordinary type variable.  For example: ::
 
@@ -11194,6 +11807,29 @@ demonstrates:
         In the expression: (True, 1 == 'a')
     Prelude> fst x
     True
+
+Limitations of deferred type errors
+-----------------------------------
+The errors that can be deferred are:
+
+- Out of scope term variables
+- Equality constraints; e.g. `ord True` gives rise to an insoluble equality constraint `Char ~ Bool`, which can be deferred.
+- Type-class and implicit-parameter constraints
+
+All other type errors are reported immediately, and cannot be deferred; for
+example, an ill-kinded type signature, an instance declaration that is
+non-terminating or ill-formed, a type-family instance that does not
+obey the declared injectivity constraints, etc etc.
+
+In a few cases, even equality constraints cannot be deferred.  Specifically:
+
+- Kind-equalities cannot be deferred, e.g. ::
+
+    f :: Int Bool -> Char
+
+  This type signature contains a kind error which cannot be deferred.
+
+- Type equalities under a forall cannot be deferred (c.f. Trac #14605).
 
 .. _template-haskell:
 
@@ -12345,7 +12981,7 @@ Bang patterns and Strict Haskell
 In high-performance Haskell code (e.g. numeric code) eliminating
 thunks from an inner loop can be a huge win.
 GHC supports three extensions to allow the programmer to specify
-use of strict (call-by-value) evalution rather than lazy (call-by-need)
+use of strict (call-by-value) evaluation rather than lazy (call-by-need)
 evaluation.
 
 - Bang patterns (:extension:`BangPatterns`) makes pattern matching and
@@ -12522,6 +13158,10 @@ optionally had by adding ``!`` in front of a variable.
        f !x = ...
 
    Adding ``~`` in front of ``x`` gives the regular lazy behavior.
+
+   Turning patterns into irrefutable ones requires ``~(~p)`` or ``(~ ~p)`` when ``Strict`` is enabled.
+
+
 
 -  **Let/where bindings**
 
@@ -12838,7 +13478,7 @@ GHC offers a helping hand here, doing all of this for you. For every use
 of ``assert`` in the user's source: ::
 
     kelvinToC :: Double -> Double
-    kelvinToC k = assert (k >= 0.0) (k+273.15)
+    kelvinToC k = assert (k >= 0.0) (k-273.15)
 
 GHC will rewrite this to also include the source location where the
 assertion was made, ::
@@ -13194,9 +13834,8 @@ Conjunction binds stronger than disjunction.
 
 If no ``MINIMAL`` pragma is given in the class declaration, it is just as if
 a pragma ``{-# MINIMAL op1, op2, ..., opn #-}`` was given, where the
-``opi`` are the methods (a) that lack a default method in the class
-declaration, and (b) whose name that does not start with an underscore
-(c.f. :ghc-flag:`-Wmissing-methods`, :ref:`options-sanity`).
+``opi`` are the methods that lack a default method in the class
+declaration (c.f. :ghc-flag:`-Wmissing-methods`, :ref:`options-sanity`).
 
 This warning can be turned off with the flag
 :ghc-flag:`-Wno-missing-methods <-Wmissing-methods>`.
@@ -13767,11 +14406,8 @@ See also the :ghc-flag:`-funbox-strict-fields` flag, which essentially has the
 effect of adding ``{-# UNPACK #-}`` to every strict constructor field.
 
 .. [1]
-   in fact, UNPACK has no effect without
-   -O
-   , for technical reasons (see
-   tick 5252
-   )
+   In fact, ``UNPACK`` has no effect without :ghc-flag:`-O`, for technical
+   reasons (see :ghc-ticket:`5252`).
 
 .. _nounpack-pragma:
 
@@ -14895,28 +15531,67 @@ HasCallStack
 ``GHC.Stack.HasCallStack`` is a lightweight method of obtaining a
 partial call-stack at any point in the program.
 
-A function can request its call-site with the ``HasCallStack`` constraint.
-For example, we can define ::
+A function can request its call-site with the ``HasCallStack`` constraint
+and access it as a Haskell value by using ``callStack``.
 
-   errorWithCallStack :: HasCallStack => String -> a
+One can then use functions from ``GHC.Stack`` to inspect or pretty
+print (as is done in ``f`` below) the call stack.
 
-as a variant of ``error`` that will get its call-site (as of GHC 8.0,
-``error`` already gets its call-site, but let's assume for the sake of
-demonstration that it does not). We can access the call-stack inside
-``errorWithCallStack`` with ``GHC.Stack.callStack``. ::
+   f :: HasCallStack => IO ()
+   f = putStrLn (prettyCallStack callStack)
 
-   errorWithCallStack :: HasCallStack => String -> a
-   errorWithCallStack msg = error (msg ++ "\n" ++ prettyCallStack callStack)
+   g :: HasCallStack => IO ()
+   g = f
 
-Thus, if we call ``errorWithCallStack`` we will get a formatted call-stack
-alongside our error message.
+Evaluating ``f`` directly shows a call stack with a single entry,
+while evaluating ``g``, which also requests its call-site, shows
+two entries, one for each computation "annotated" with
+``HasCallStack``.
 
 .. code-block:: none
 
-   ghci> errorWithCallStack "die"
-   *** Exception: die
+   ghci> f
    CallStack (from HasCallStack):
-     errorWithCallStack, called at <interactive>:2:1 in interactive:Ghci1
+     f, called at <interactive>:19:1 in interactive:Ghci1
+   ghci> g
+   CallStack (from HasCallStack):
+     f, called at <interactive>:17:5 in main:Main
+     g, called at <interactive>:20:1 in interactive:Ghci2
+
+The ``error`` function from the Prelude supports printing the call stack that
+led to the error in addition to the usual error message:
+
+.. code-block:: none
+
+   ghci> error "bad"
+   *** Exception: bad
+   CallStack (from HasCallStack):
+     error, called at <interactive>:25:1 in interactive:Ghci5
+
+The call stack here consists of a single entry, pinpointing the source
+of the call to ``error``. However, by annotating several computations
+with ``HasCallStack``, figuring out the exact circumstances and sequences
+of calls that lead to a call to ``error`` becomes a lot easier, as demonstrated
+with the simple example below. ::
+
+   f :: HasCallStack => IO ()
+   f = error "bad bad bad"
+
+   g :: HasCallStack => IO ()
+   g = f
+
+   h :: HasCallStack => IO ()
+   h = g
+
+.. code-block:: none
+
+   ghci> h
+   *** Exception: bad bad bad
+   CallStack (from HasCallStack):
+     error, called at call-stack.hs:4:5 in main:Main
+     f, called at call-stack.hs:7:5 in main:Main
+     g, called at call-stack.hs:10:5 in main:Main
+     h, called at <interactive>:28:1 in interactive:Ghci1
 
 The ``CallStack`` will only extend as far as the types allow it, for
 example ::

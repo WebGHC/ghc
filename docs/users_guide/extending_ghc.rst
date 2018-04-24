@@ -179,11 +179,14 @@ GHC's intermediate language, Core. Plugins are suitable for experimental
 analysis or optimization, and require no changes to GHC's source code to
 use.
 
-Plugins cannot optimize/inspect C--, nor can they implement things like
+Plugins cannot optimize/inspect C-\\-, nor can they implement things like
 parser/front-end modifications like GCC, apart from limited changes to
 the constraint solver. If you feel strongly that any of these
 restrictions are too onerous,
 :ghc-wiki:`please give the GHC team a shout <MailingListsAndIRC>`.
+
+Plugins do not work with ``-fexternal-interpreter``. If you need to run plugins
+with ``-fexternal-interpreter`` let GHC developers know in :ghc-ticket:`14335`.
 
 .. _using-compiler-plugins:
 

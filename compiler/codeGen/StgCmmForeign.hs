@@ -1,5 +1,3 @@
-{-# LANGUAGE CPP #-}
-
 -----------------------------------------------------------------------------
 --
 -- Code generation for foreign calls.
@@ -22,12 +20,10 @@ module StgCmmForeign (
   mkExternDeclType,
  ) where
 
-#include "HsVersions.h"
-
 import GhcPrelude hiding( succ, (<*>) )
 
 import StgSyn
-import StgCmmProf (storeCurCCS, ccsType, curCCS)
+import StgCmmProf (storeCurCCS, ccsType)
 import StgCmmEnv
 import StgCmmMonad
 import StgCmmUtils
@@ -305,7 +301,7 @@ saveThreadState dflags = do
   close_nursery <- closeNursery dflags tso
   pure $ catAGraphs [
     -- tso = CurrentTSO;
-    mkAssign (CmmLocal tso) stgCurrentTSO,
+    mkAssign (CmmLocal tso) currentTSOExpr,
     -- tso->stackobj->sp = Sp;
     mkStore (cmmOffset dflags
                        (CmmLoad (cmmOffset dflags
@@ -313,11 +309,11 @@ saveThreadState dflags = do
                                            (tso_stackobj dflags))
                                 (bWord dflags))
                        (stack_SP dflags))
-            stgSp,
+            spExpr,
     close_nursery,
     -- and save the current cost centre stack in the TSO when profiling:
     if gopt Opt_SccProfilingOn dflags then
-        mkStore (cmmOffset dflags (CmmReg (CmmLocal tso)) (tso_CCCS dflags)) curCCS
+        mkStore (cmmOffset dflags (CmmReg (CmmLocal tso)) (tso_CCCS dflags)) cccsExpr
       else mkNop
     ]
 
@@ -326,7 +322,7 @@ emitCloseNursery = do
   dflags <- getDynFlags
   tso <- newTemp (bWord dflags)
   code <- closeNursery dflags tso
-  emit $ mkAssign (CmmLocal tso) stgCurrentTSO <*> code
+  emit $ mkAssign (CmmLocal tso) currentTSOExpr <*> code
 
 {- |
 @closeNursery dflags tso@ produces code to close the nursery.
@@ -354,14 +350,14 @@ closeNursery df tso = do
   let tsoreg  = CmmLocal tso
   cnreg      <- CmmLocal <$> newTemp (bWord df)
   pure $ catAGraphs [
-    mkAssign cnreg stgCurrentNursery,
+    mkAssign cnreg currentNurseryExpr,
 
     -- CurrentNursery->free = Hp+1;
-    mkStore (nursery_bdescr_free df cnreg) (cmmOffsetW df stgHp 1),
+    mkStore (nursery_bdescr_free df cnreg) (cmmOffsetW df hpExpr 1),
 
     let alloc =
            CmmMachOp (mo_wordSub df)
-              [ cmmOffsetW df stgHp 1
+              [ cmmOffsetW df hpExpr 1
               , CmmLoad (nursery_bdescr_start df cnreg) (bWord df)
               ]
 
@@ -388,18 +384,18 @@ loadThreadState dflags = do
   open_nursery <- openNursery dflags tso
   pure $ catAGraphs [
     -- tso = CurrentTSO;
-    mkAssign (CmmLocal tso) stgCurrentTSO,
+    mkAssign (CmmLocal tso) currentTSOExpr,
     -- stack = tso->stackobj;
     mkAssign (CmmLocal stack) (CmmLoad (cmmOffset dflags (CmmReg (CmmLocal tso)) (tso_stackobj dflags)) (bWord dflags)),
     -- Sp = stack->sp;
-    mkAssign sp (CmmLoad (cmmOffset dflags (CmmReg (CmmLocal stack)) (stack_SP dflags)) (bWord dflags)),
+    mkAssign spReg (CmmLoad (cmmOffset dflags (CmmReg (CmmLocal stack)) (stack_SP dflags)) (bWord dflags)),
     -- SpLim = stack->stack + RESERVED_STACK_WORDS;
-    mkAssign spLim (cmmOffsetW dflags (cmmOffset dflags (CmmReg (CmmLocal stack)) (stack_STACK dflags))
+    mkAssign spLimReg (cmmOffsetW dflags (cmmOffset dflags (CmmReg (CmmLocal stack)) (stack_STACK dflags))
                                 (rESERVED_STACK_WORDS dflags)),
     -- HpAlloc = 0;
     --   HpAlloc is assumed to be set to non-zero only by a failed
     --   a heap check, see HeapStackCheck.cmm:GC_GENERIC
-    mkAssign hpAlloc (zeroExpr dflags),
+    mkAssign hpAllocReg (zeroExpr dflags),
     open_nursery,
     -- and load the current cost centre stack from the TSO when profiling:
     if gopt Opt_SccProfilingOn dflags
@@ -415,7 +411,7 @@ emitOpenNursery = do
   dflags <- getDynFlags
   tso <- newTemp (bWord dflags)
   code <- openNursery dflags tso
-  emit $ mkAssign (CmmLocal tso) stgCurrentTSO <*> code
+  emit $ mkAssign (CmmLocal tso) currentTSOExpr <*> code
 
 {- |
 @openNursery dflags tso@ produces code to open the nursery. A local register
@@ -426,8 +422,8 @@ Opening the nursery corresponds to the following code:
 @
    tso = CurrentTSO;
    cn = CurrentNursery;
-   bdfree = CurrentNuresry->free;
-   bdstart = CurrentNuresry->start;
+   bdfree = CurrentNursery->free;
+   bdstart = CurrentNursery->start;
 
    // We *add* the currently occupied portion of the nursery block to
    // the allocation limit, because we will subtract it again in
@@ -457,17 +453,17 @@ openNursery df tso = do
   -- what code we generate, look at the assembly for
   -- stg_returnToStackTop in rts/StgStartup.cmm.
   pure $ catAGraphs [
-     mkAssign cnreg stgCurrentNursery,
+     mkAssign cnreg currentNurseryExpr,
      mkAssign bdfreereg  (CmmLoad (nursery_bdescr_free df cnreg)  (bWord df)),
 
      -- Hp = CurrentNursery->free - 1;
-     mkAssign hp (cmmOffsetW df (CmmReg bdfreereg) (-1)),
+     mkAssign hpReg (cmmOffsetW df (CmmReg bdfreereg) (-1)),
 
      mkAssign bdstartreg (CmmLoad (nursery_bdescr_start df cnreg) (bWord df)),
 
      -- HpLim = CurrentNursery->start +
      --              CurrentNursery->blocks*BLOCK_SIZE_W - 1;
-     mkAssign hpLim
+     mkAssign hpLimReg
          (cmmOffsetExpr df
              (CmmReg bdstartreg)
              (cmmOffset df
@@ -513,21 +509,6 @@ stack_SP     dflags = closureField dflags (oFFSET_StgStack_sp dflags)
 
 closureField :: DynFlags -> ByteOff -> ByteOff
 closureField dflags off = off + fixedHdrSize dflags
-
-stgSp, stgHp, stgCurrentTSO, stgCurrentNursery :: CmmExpr
-stgSp             = CmmReg sp
-stgHp             = CmmReg hp
-stgCurrentTSO     = CmmReg currentTSO
-stgCurrentNursery = CmmReg currentNursery
-
-sp, spLim, hp, hpLim, currentTSO, currentNursery, hpAlloc :: CmmReg
-sp                = CmmGlobal Sp
-spLim             = CmmGlobal SpLim
-hp                = CmmGlobal Hp
-hpLim             = CmmGlobal HpLim
-currentTSO        = CmmGlobal CurrentTSO
-currentNursery    = CmmGlobal CurrentNursery
-hpAlloc           = CmmGlobal HpAlloc
 
 -- -----------------------------------------------------------------------------
 -- For certain types passed to foreign calls, we adjust the actual

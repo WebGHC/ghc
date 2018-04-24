@@ -116,7 +116,7 @@ def boot_pkgs():
             if os.path.isfile(cabal):
                 # strip both .cabal and .in
                 pkg = os.path.splitext(os.path.splitext(os.path.basename(cabal))[0])[0]
-                top = package
+                top = os.path.join(*['..'] * len(os.path.normpath(package).split(os.path.sep)))
 
                 ghc_mk = os.path.join(package, 'ghc.mk')
                 print('Creating %s' % ghc_mk)
@@ -131,6 +131,17 @@ def boot_pkgs():
                         """.format(package = package,
                                 pkg = pkg,
                                 dir = dir_)))
+
+                makefile = os.path.join(package, 'GNUmakefile')
+                with open(makefile, 'w') as f:
+                    f.write(dedent(
+                        """\
+                        dir = {package}
+                        TOP = {top}
+                        include $(TOP)/mk/sub-makefile.mk
+                        FAST_MAKE_OPTS += stage=0
+                        """.format(package = package, top = top)
+                    ))
 
 
 def autoreconf():

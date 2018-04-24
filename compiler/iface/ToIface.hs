@@ -74,9 +74,13 @@ import Data.Maybe ( catMaybes )
 
 ----------------
 toIfaceTvBndr :: TyVar -> IfaceTvBndr
-toIfaceTvBndr tyvar   = ( occNameFS (getOccName tyvar)
-                        , toIfaceKind (tyVarKind tyvar)
-                        )
+toIfaceTvBndr = toIfaceTvBndrX emptyVarSet
+
+toIfaceTvBndrX :: VarSet -> TyVar -> IfaceTvBndr
+toIfaceTvBndrX fr tyvar = ( occNameFS (getOccName tyvar)
+                          , toIfaceTypeX fr (tyVarKind tyvar)
+                          )
+
 
 toIfaceIdBndr :: Id -> (IfLclName, IfaceType)
 toIfaceIdBndr id      = (occNameFS (getOccName id),    toIfaceType (idType id))
@@ -120,7 +124,7 @@ toIfaceTypeX fr (TyVarTy tv)   -- See Note [TcTyVars in IfaceType] in IfaceType
   | otherwise                  = IfaceTyVar (toIfaceTyVar tv)
 toIfaceTypeX fr (AppTy t1 t2)  = IfaceAppTy (toIfaceTypeX fr t1) (toIfaceTypeX fr t2)
 toIfaceTypeX _  (LitTy n)      = IfaceLitTy (toIfaceTyLit n)
-toIfaceTypeX fr (ForAllTy b t) = IfaceForAllTy (toIfaceForAllBndr b)
+toIfaceTypeX fr (ForAllTy b t) = IfaceForAllTy (toIfaceForAllBndrX fr b)
                                                (toIfaceTypeX (fr `delVarSet` binderVar b) t)
 toIfaceTypeX fr (FunTy t1 t2)
   | isPredTy t1                 = IfaceDFunTy (toIfaceTypeX fr t1) (toIfaceTypeX fr t2)
@@ -160,7 +164,10 @@ toIfaceCoVar :: CoVar -> FastString
 toIfaceCoVar = occNameFS . getOccName
 
 toIfaceForAllBndr :: TyVarBinder -> IfaceForAllBndr
-toIfaceForAllBndr (TvBndr v vis) = TvBndr (toIfaceTvBndr v) vis
+toIfaceForAllBndr = toIfaceForAllBndrX emptyVarSet
+
+toIfaceForAllBndrX :: VarSet -> TyVarBinder -> IfaceForAllBndr
+toIfaceForAllBndrX fr (TvBndr v vis) = TvBndr (toIfaceTvBndrX fr v) vis
 
 ----------------
 toIfaceTyCon :: TyCon -> IfaceTyCon
@@ -218,11 +225,13 @@ toIfaceCoercionX fr co
     go (CoVarCo cv)
       -- See [TcTyVars in IfaceType] in IfaceType
       | cv `elemVarSet` fr  = IfaceFreeCoVar cv
-      | otherwise           = IfaceCoVarCo  (toIfaceCoVar cv)
+      | otherwise           = IfaceCoVarCo (toIfaceCoVar cv)
+    go (HoleCo h)           = IfaceHoleCo  (coHoleCoVar h)
+
     go (AppCo co1 co2)      = IfaceAppCo  (go co1) (go co2)
     go (SymCo co)           = IfaceSymCo (go co)
     go (TransCo co1 co2)    = IfaceTransCo (go co1) (go co2)
-    go (NthCo d co)         = IfaceNthCo d (go co)
+    go (NthCo _r d co)      = IfaceNthCo d (go co)
     go (LRCo lr co)         = IfaceLRCo lr (go co)
     go (InstCo co arg)      = IfaceInstCo (go co) (go arg)
     go (CoherenceCo c1 c2)  = IfaceCoherenceCo (go c1) (go c2)
@@ -250,7 +259,6 @@ toIfaceCoercionX fr co
     go_prov (PhantomProv co)    = IfacePhantomProv (go co)
     go_prov (ProofIrrelProv co) = IfaceProofIrrelProv (go co)
     go_prov (PluginProv str)    = IfacePluginProv str
-    go_prov (HoleProv h)        = IfaceHoleProv (chUnique h)
 
 toIfaceTcArgs :: TyCon -> [Type] -> IfaceTcArgs
 toIfaceTcArgs = toIfaceTcArgsX emptyVarSet
@@ -436,8 +444,15 @@ toIfUnfolding lb (DFunUnfolding { df_bndrs = bndrs, df_args = args })
       -- No need to serialise the data constructor;
       -- we can recover it from the type of the dfun
 
-toIfUnfolding _ _
-  = Nothing
+toIfUnfolding _ (OtherCon {}) = Nothing
+  -- The binding site of an Id doesn't have OtherCon, except perhaps
+  -- where we have called zapUnfolding; and that evald'ness info is
+  -- not needed by importing modules
+
+toIfUnfolding _ BootUnfolding = Nothing
+  -- Can't happen; we only have BootUnfolding for imported binders
+
+toIfUnfolding _ NoUnfolding = Nothing
 
 {-
 ************************************************************************

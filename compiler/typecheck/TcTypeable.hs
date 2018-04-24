@@ -12,7 +12,7 @@ module TcTypeable(mkTypeableBinds) where
 
 import GhcPrelude
 
-import BasicTypes ( Boxity(..), neverInlinePragma )
+import BasicTypes ( Boxity(..), neverInlinePragma, SourceText(..) )
 import TcBinds( addTypecheckedBinds )
 import IfaceEnv( newGlobalBinder )
 import TyCoRep( Type(..), TyLit(..) )
@@ -345,9 +345,8 @@ mkPrimTypeableTodos
 -- Note [Built-in syntax and the OrigNameCache] in IfaceEnv for more.
 ghcPrimTypeableTyCons :: [TyCon]
 ghcPrimTypeableTyCons = concat
-    [ [ runtimeRepTyCon, vecCountTyCon, vecElemTyCon
-      , funTyCon, tupleTyCon Unboxed 0 ]
-    , map (tupleTyCon Unboxed) [2..mAX_TUPLE_SIZE]
+    [ [ runtimeRepTyCon, vecCountTyCon, vecElemTyCon, funTyCon ]
+    , map (tupleTyCon Unboxed) [0..mAX_TUPLE_SIZE]
     , map sumTyCon [2..mAX_SUM_SIZE]
     , primTyCons
     ]
@@ -632,12 +631,12 @@ mkTyConRepTyConRHS (Stuff {..}) todo tycon kind_rep
                                                    ]
 
     int :: Int -> HsLit GhcTc
-    int n = HsIntPrim (sourceText $ show n) (toInteger n)
+    int n = HsIntPrim (SourceText $ show n) (toInteger n)
 
 word64 :: DynFlags -> Word64 -> HsLit GhcTc
 word64 dflags n
-  | wORD_SIZE dflags == 4 = HsWord64Prim noSourceText (toInteger n)
-  | otherwise             = HsWordPrim   noSourceText (toInteger n)
+  | wORD_SIZE dflags == 4 = HsWord64Prim NoSourceText (toInteger n)
+  | otherwise             = HsWordPrim   NoSourceText (toInteger n)
 
 {-
 Note [Representing TyCon kinds: KindRep]
@@ -655,17 +654,20 @@ The TypeRep encoding of `Proxy Type Int` looks like this:
 
     $tcProxy :: GHC.Types.TyCon
     $trInt   :: TypeRep Int
-    $trType  :: TypeRep Type
+    TrType   :: TypeRep Type
 
     $trProxyType :: TypeRep (Proxy Type :: Type -> Type)
     $trProxyType = TrTyCon $tcProxy
-                           [$trType]  -- kind variable instantiation
+                           [TrType]  -- kind variable instantiation
+                           (tyConKind $tcProxy [TrType]) -- The TypeRep of
+                                                         -- Type -> Type
 
     $trProxy :: TypeRep (Proxy Type Int)
-    $trProxy = TrApp $trProxyType $trInt
+    $trProxy = TrApp $trProxyType $trInt TrType
 
     $tkProxy :: GHC.Types.KindRep
-    $tkProxy = KindRepFun (KindRepVar 0) (KindRepTyConApp $trType [])
+    $tkProxy = KindRepFun (KindRepVar 0)
+                          (KindRepTyConApp (KindRepTYPE LiftedRep) [])
 
 Note how $trProxyType cannot use 'TrApp', because TypeRep cannot represent
 polymorphic types.  So instead
@@ -679,9 +681,10 @@ polymorphic types.  So instead
        Proxy :: forall k. k->Type
 
  * A KindRep is just a recipe that we can instantiate with the
-   argument kinds, using Data.Typeable.Internal.instantiateKindRep.
+   argument kinds, using Data.Typeable.Internal.tyConKind and
+   store in the relevant 'TypeRep' constructor.
 
-   Data.Typeable.Internal.typeRepKind uses instantiateKindRep
+   Data.Typeable.Internal.typeRepKind looks up the stored kinds.
 
  * In a KindRep, the kind variables are represented by 0-indexed
    de Bruijn numbers:

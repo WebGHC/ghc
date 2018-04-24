@@ -7,7 +7,7 @@
 -- Module      :  GHC.Unicode
 -- Copyright   :  (c) The University of Glasgow, 2003
 -- License     :  see libraries/base/LICENSE
--- 
+--
 -- Maintainer  :  cvs-ghc@haskell.org
 -- Stability   :  internal
 -- Portability :  non-portable (GHC extensions)
@@ -129,7 +129,13 @@ data GeneralCategory
         | Surrogate             -- ^ Cs: Other, Surrogate
         | PrivateUse            -- ^ Co: Other, Private Use
         | NotAssigned           -- ^ Cn: Other, Not Assigned
-        deriving (Show, Eq, Ord, Enum, Bounded, Ix)
+        deriving ( Show     -- ^ @since 2.01
+                 , Eq       -- ^ @since 2.01
+                 , Ord      -- ^ @since 2.01
+                 , Enum     -- ^ @since 2.01
+                 , Bounded  -- ^ @since 2.01
+                 , Ix       -- ^ @since 2.01
+                 )
 
 -- | The Unicode general category of the character. This relies on the
 -- 'Enum' instance of 'GeneralCategory', which must remain in the
@@ -214,11 +220,12 @@ isLower                 :: Char -> Bool
 -- This function is equivalent to 'Data.Char.isLetter'.
 isAlpha                 :: Char -> Bool
 
--- | Selects alphabetic or numeric digit Unicode characters.
+-- | Selects alphabetic or numeric Unicode characters.
 --
--- Note that numeric digits outside the ASCII range are selected by this
--- function but not by 'isDigit'.  Such digits may be part of identifiers
--- but are not used by the printer and reader to represent numbers.
+-- Note that numeric digits outside the ASCII range, as well as numeric
+-- characters which aren't digits, are selected by this function but not by
+-- 'isDigit'. Such characters may be part of identifiers but are not used by
+-- the printer and reader to represent numbers.
 isAlphaNum              :: Char -> Bool
 
 -- | Selects ASCII digits, i.e. @\'0\'@..@\'9\'@.
@@ -394,4 +401,3 @@ foreign import ccall unsafe "u_towtitle"
 
 foreign import ccall unsafe "u_gencat"
   wgencat :: Int -> Int
-

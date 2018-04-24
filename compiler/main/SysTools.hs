@@ -48,6 +48,7 @@ import ErrUtils
 import Platform
 import Util
 import DynFlags
+import Fingerprint
 
 import System.FilePath
 import System.IO
@@ -63,7 +64,7 @@ Note [How GHC finds toolchain utilities]
 
 SysTools.initSysProgs figures out exactly where all the auxiliary programs
 are, and initialises mutable variables to make it easy to call them.
-To to this, it makes use of definitions in Config.hs, which is a Haskell
+To do this, it makes use of definitions in Config.hs, which is a Haskell
 file containing variables whose value is figured out by the build system.
 
 Config.hs contains two sorts of things
@@ -133,6 +134,8 @@ initSysTools mbMinusB
              -- see Note [topdir: How GHC finds its files]
              -- NB: top_dir is assumed to be in standard Unix
              -- format, '/' separated
+       mtool_dir <- findToolDir top_dir
+             -- see Note [tooldir: How GHC finds mingw and perl on Windows]
 
        let settingsFile = top_dir </> "settings"
            platformConstantsFile = top_dir </> "platformConstants"
@@ -157,6 +160,7 @@ initSysTools mbMinusB
        let getSetting key = case lookup key mySettings of
                             Just xs -> return $ expandTopDir top_dir xs
                             Nothing -> pgmError ("No entry for " ++ show key ++ " in " ++ show settingsFile)
+           getToolSetting key = expandToolDir mtool_dir <$> getSetting key
            getBooleanSetting key = case lookup key mySettings of
                                    Just "YES" -> return True
                                    Just "NO" -> return False
@@ -178,14 +182,15 @@ initSysTools mbMinusB
        targetHasSubsectionsViaSymbols <- readSetting "target has subsections via symbols"
        myExtraGccViaCFlags <- getSetting "GCC extra via C opts"
        -- On Windows, mingw is distributed with GHC,
-       -- so we look in TopDir/../mingw/bin
+       -- so we look in TopDir/../mingw/bin,
+       -- as well as TopDir/../../mingw/bin for hadrian.
        -- It would perhaps be nice to be able to override this
        -- with the settings file, but it would be a little fiddly
        -- to make that possible, so for now you can't.
-       gcc_prog <- getSetting "C compiler command"
+       gcc_prog <- getToolSetting "C compiler command"
        gcc_args_str <- getSetting "C compiler flags"
        gccSupportsNoPie <- getBooleanSetting "C compiler supports -no-pie"
-       cpp_prog <- getSetting "Haskell CPP command"
+       cpp_prog <- getToolSetting "Haskell CPP command"
        cpp_args_str <- getSetting "Haskell CPP flags"
        let unreg_gcc_args = if targetUnregisterised
                             then ["-DNO_REGS", "-DUSE_MINIINTERPRETER"]
@@ -203,7 +208,7 @@ initSysTools mbMinusB
        ldSupportsBuildId       <- getBooleanSetting "ld supports build-id"
        ldSupportsFilelist      <- getBooleanSetting "ld supports filelist"
        ldIsGnuLd               <- getBooleanSetting "ld is GNU ld"
-       perl_path <- getSetting "perl command"
+       perl_path <- getToolSetting "perl command"
 
        let pkgconfig_path = installed "package.conf.d"
            ghc_usage_msg_path  = installed "ghc-usage.txt"
@@ -216,14 +221,14 @@ initSysTools mbMinusB
              -- split is a Perl script
            split_script  = libexec cGHC_SPLIT_PGM
 
-       windres_path <- getSetting "windres command"
-       libtool_path <- getSetting "libtool command"
-       ar_path <- getSetting "ar command"
-       ranlib_path <- getSetting "ranlib command"
+       windres_path <- getToolSetting "windres command"
+       libtool_path <- getToolSetting "libtool command"
+       ar_path <- getToolSetting "ar command"
+       ranlib_path <- getToolSetting "ranlib command"
 
        tmpdir <- getTemporaryDirectory
 
-       touch_path <- getSetting "touch command"
+       touch_path <- getToolSetting "touch command"
 
        let -- On Win32 we don't want to rely on #!/bin/perl, so we prepend
            -- a call to Perl to get the invocation of split.
@@ -234,7 +239,7 @@ initSysTools mbMinusB
            (split_prog,  split_args)
              | isWindowsHost = (perl_path,    [Option split_script])
              | otherwise     = (split_script, [])
-       mkdll_prog <- getSetting "dllwrap command"
+       mkdll_prog <- getToolSetting "dllwrap command"
        let mkdll_args = []
 
        -- cpp is derived from gcc on all platforms
@@ -302,6 +307,7 @@ initSysTools mbMinusB
                     sPgm_i   = iserv_prog,
                     sOpt_L       = [],
                     sOpt_P       = [],
+                    sOpt_P_fingerprint = fingerprint0,
                     sOpt_F       = [],
                     sOpt_c       = [],
                     sOpt_a       = [],

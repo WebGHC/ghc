@@ -30,7 +30,10 @@ module SimplUtils (
         addValArgTo, addCastTo, addTyArgTo,
         argInfoExpr, argInfoAppArgs, pushSimplifiedArgs,
 
-        abstractFloats
+        abstractFloats,
+
+        -- Utilities
+        isExitJoinId
     ) where
 
 #include "HsVersions.h"
@@ -935,8 +938,8 @@ mark it 'demanded', so when the RHS is simplified, it'll get an ArgOf
 continuation.
 -}
 
-activeUnfolding :: SimplEnv -> Id -> Bool
-activeUnfolding env id
+activeUnfolding :: SimplMode -> Id -> Bool
+activeUnfolding mode id
   | isCompulsoryUnfolding (realIdUnfolding id)
   = True   -- Even sm_inline can't override compulsory unfoldings
   | otherwise
@@ -947,8 +950,6 @@ activeUnfolding env id
       --  (a) they are active
       --  (b) sm_inline says so, except that for stable unfoldings
       --                         (ie pragmas) we inline anyway
-  where
-    mode = getMode env
 
 getUnfoldingInRuleMatch :: SimplEnv -> InScopeEnv
 -- When matching in RULE, we want to "look through" an unfolding
@@ -973,13 +974,11 @@ getUnfoldingInRuleMatch env
      | otherwise           = isActive (sm_phase mode) (idInlineActivation id)
 
 ----------------------
-activeRule :: SimplEnv -> Activation -> Bool
+activeRule :: SimplMode -> Activation -> Bool
 -- Nothing => No rules at all
-activeRule env
+activeRule mode
   | not (sm_rules mode) = \_ -> False     -- Rewriting is off
   | otherwise           = isActive (sm_phase mode)
-  where
-    mode = getMode env
 
 {-
 ************************************************************************
@@ -1086,6 +1085,11 @@ want PreInlineUnconditionally to second-guess it.  A live example is
 Trac #3736.
     c.f. Note [Stable unfoldings and postInlineUnconditionally]
 
+NB: if the pragama is INLINEABLE, then we don't want to behave int
+this special way -- an INLINEABLE pragam just says to GHC "inline this
+if you like".  But if there is a unique occurrence, we want to inline
+the stable unfolding, not the RHS.
+
 Note [Top-level bottoming Ids]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Don't inline top-level Ids that are bottoming, even if they are used just
@@ -1099,33 +1103,44 @@ is a term (not a coercion) so we can't necessarily inline the latter in
 the former.
 -}
 
-preInlineUnconditionally :: SimplEnv -> TopLevelFlag -> InId -> InExpr -> Bool
+preInlineUnconditionally
+    :: SimplEnv -> TopLevelFlag -> InId
+    -> InExpr -> StaticEnv  -- These two go together
+    -> Maybe SimplEnv       -- Returned env has extended substitution
 -- Precondition: rhs satisfies the let/app invariant
 -- See Note [CoreSyn let/app invariant] in CoreSyn
 -- Reason: we don't want to inline single uses, or discard dead bindings,
 --         for unlifted, side-effect-ful bindings
-preInlineUnconditionally env top_lvl bndr rhs
-  | not pre_inline_unconditionally           = False
-  | not active                               = False
-  | isStableUnfolding (idUnfolding bndr)     = False -- Note [Stable unfoldings and preInlineUnconditionally]
-  | isTopLevel top_lvl && isBottomingId bndr = False -- Note [Top-level bottoming Ids]
-  | isCoVar bndr                             = False -- Note [Do not inline CoVars unconditionally]
-  | isExitJoinId bndr                        = False
-  | otherwise = case idOccInfo bndr of
-                  IAmDead                    -> True -- Happens in ((\x.1) v)
-                  occ@OneOcc { occ_one_br = True }
-                                             -> try_once (occ_in_lam occ)
-                                                         (occ_int_cxt occ)
-                  _                          -> False
+preInlineUnconditionally env top_lvl bndr rhs rhs_env
+  | not pre_inline_unconditionally           = Nothing
+  | not active                               = Nothing
+  | isTopLevel top_lvl && isBottomingId bndr = Nothing -- Note [Top-level bottoming Ids]
+  | isCoVar bndr                             = Nothing -- Note [Do not inline CoVars unconditionally]
+  | isExitJoinId bndr                        = Nothing -- Note [Do not inline exit join points] in Exitify
+  | not (one_occ (idOccInfo bndr))           = Nothing
+  | not (isStableUnfolding unf)              = Just (extend_subst_with rhs)
+
+  -- Note [Stable unfoldings and preInlineUnconditionally]
+  | isInlinablePragma inline_prag
+  , Just inl <- maybeUnfoldingTemplate unf   = Just (extend_subst_with inl)
+  | otherwise                                = Nothing
   where
-    pre_inline_unconditionally = gopt Opt_SimplPreInlining (seDynFlags env)
-    mode   = getMode env
-    active = isActive (sm_phase mode) act
-             -- See Note [pre/postInlineUnconditionally in gentle mode]
-    act = idInlineActivation bndr
-    try_once in_lam int_cxt     -- There's one textual occurrence
+    unf = idUnfolding bndr
+    extend_subst_with inl_rhs = extendIdSubst env bndr (mkContEx rhs_env inl_rhs)
+
+    one_occ IAmDead = True -- Happens in ((\x.1) v)
+    one_occ (OneOcc { occ_one_br = True      -- One textual occurrence
+                    , occ_in_lam = in_lam
+                    , occ_int_cxt = int_cxt })
         | not in_lam = isNotTopLevel top_lvl || early_phase
         | otherwise  = int_cxt && canInlineInLam rhs
+    one_occ _        = False
+
+    pre_inline_unconditionally = gopt Opt_SimplPreInlining (seDynFlags env)
+    mode   = getMode env
+    active = isActive (sm_phase mode) (inlinePragmaActivation inline_prag)
+             -- See Note [pre/postInlineUnconditionally in gentle mode]
+    inline_prag = idInlinePragma bndr
 
 -- Be very careful before inlining inside a lambda, because (a) we must not
 -- invalidate occurrence information, and (b) we want to avoid pushing a
@@ -2097,7 +2112,7 @@ mkCase1 dflags scrut bndr alts_ty alts = mkCase2 dflags scrut bndr alts_ty alts
 
 mkCase2 dflags scrut bndr alts_ty alts
   | -- See Note [Scrutinee Constant Folding]
-    case alts of  -- Not if there is just a DEFAULT alterantive
+    case alts of  -- Not if there is just a DEFAULT alternative
       [(DEFAULT,_,_)] -> False
       _               -> True
   , gopt Opt_CaseFolding dflags
@@ -2153,17 +2168,46 @@ mkCase2 dflags scrut bndr alts_ty alts
     re_sort alts = sortBy cmpAlt alts  -- preserve the #case_invariants#
 
     add_default :: [CoreAlt] -> [CoreAlt]
-    -- TagToEnum may change a boolean True/False set of alternatives
-    -- to LitAlt 0#/1# alterantives.  But literal alternatives always
-    -- have a DEFAULT (I think).  So add it.
+    -- See Note [Literal cases]
     add_default ((LitAlt {}, bs, rhs) : alts) = (DEFAULT, bs, rhs) : alts
     add_default alts                          = alts
+
+{- Note [Literal cases]
+~~~~~~~~~~~~~~~~~~~~~~~
+If we have
+  case tagToEnum (a ># b) of
+     False -> e1
+     True  -> e2
+
+then caseRules for TagToEnum will turn it into
+  case tagToEnum (a ># b) of
+     0# -> e1
+     1# -> e2
+
+Since the case is exhaustive (all cases are) we can convert it to
+  case tagToEnum (a ># b) of
+     DEFAULT -> e1
+     1#      -> e2
+
+This may generate sligthtly better code (although it should not, since
+all cases are exhaustive) and/or optimise better.  I'm not certain that
+it's necessary, but currenty we do make this change.  We do it here,
+NOT in the TagToEnum rules (see "Beware" in Note [caseRules for tagToEnum]
+in PrelRules)
+-}
 
 --------------------------------------------------
 --      Catch-all
 --------------------------------------------------
 mkCase3 _dflags scrut bndr alts_ty alts
   = return (Case scrut bndr alts_ty alts)
+
+-- See Note [Exitification] and Note [Do not inline exit join points] in Exitify.hs
+-- This lives here (and not in Id) becuase occurrence info is only valid on
+-- InIds, so it's crucial that isExitJoinId is only called on freshly
+-- occ-analysed code. It's not a generic function you can call anywhere.
+isExitJoinId :: Var -> Bool
+isExitJoinId id = isJoinId id && isOneOcc (idOccInfo id) && occ_in_lam (idOccInfo id)
 
 {-
 Note [Dead binders]

@@ -401,10 +401,18 @@ tcExtendKindEnv extra_env thing_inside
 
 -----------------------
 -- Scoped type and kind variables
+-- Before using this function, consider using TcHsType.scopeTyVars, which
+-- bumps the TcLevel and thus prevents any of these TyVars from appearing
+-- in kinds of tyvars in an outer scope.
+-- Indeed, you should always use scopeTyVars unless some other code nearby
+-- bumps the TcLevel.
 tcExtendTyVarEnv :: [TyVar] -> TcM r -> TcM r
 tcExtendTyVarEnv tvs thing_inside
-  = tcExtendTyVarEnv2 [(tyVarName tv, tv) | tv <- tvs] thing_inside
+  = tcExtendTyVarEnv2 (mkTyVarNamePairs tvs) thing_inside
 
+-- Before using this function, consider using TcHsType.scopeTyVars2, which
+-- bumps the TcLevel and thus prevents any of these TyVars from appearing
+-- in kinds of tyvars in an outer scope.
 tcExtendTyVarEnv2 :: [(Name,TcTyVar)] -> TcM r -> TcM r
 tcExtendTyVarEnv2 binds thing_inside
   -- this should be used only for explicitly mentioned scoped variables.
@@ -469,7 +477,7 @@ tcExtendLetEnv top_lvl sig_fn (IsGroupClosed fvs fv_type_closed)
 
 tcExtendIdEnv :: [TcId] -> TcM a -> TcM a
 -- For lambda-bound and case-bound Ids
--- Extends the the TcBinderStack as well
+-- Extends the TcBinderStack as well
 tcExtendIdEnv ids thing_inside
   = tcExtendIdEnv2 [(idName id, id) | id <- ids] thing_inside
 
@@ -537,11 +545,17 @@ tcExtendLocalTypeEnv lcl_env@(TcLclEnv { tcl_env = lcl_type_env }) tc_ty_things
 
     get_tvs (_, ATcId { tct_id = id, tct_info = closed }) tvs
       = case closed of
-          ClosedLet ->
-            ASSERT2( isEmptyVarSet id_tvs, ppr id $$ ppr (idType id) ) tvs
-          _           ->
-            tvs `unionVarSet` id_tvs
-        where id_tvs = tyCoVarsOfType (idType id)
+          ClosedLet -> ASSERT2( is_closed_type, ppr id $$ ppr (idType id) )
+                       tvs
+          _other    -> tvs `unionVarSet` id_tvs
+        where
+           id_tvs = tyCoVarsOfType (idType id)
+           is_closed_type = not (anyVarSet isTyVar id_tvs)
+           -- We only care about being closed wrt /type/ variables
+           -- E.g. a top-level binding might have a type like
+           --          foo :: t |> co
+           -- where co :: * ~ *
+           -- or some other as-yet-unsolved kind coercion
 
     get_tvs (_, ATyVar _ tv) tvs          -- See Note [Global TyVars]
       = tvs `unionVarSet` tyCoVarsOfType (tyVarKind tv) `extendVarSet` tv
@@ -649,8 +663,8 @@ getTypeSigNames sigs
     get_type_sig :: LSig GhcRn -> NameSet -> NameSet
     get_type_sig sig ns =
       case sig of
-        L _ (TypeSig names _) -> extendNameSetList ns (map unLoc names)
-        L _ (PatSynSig names _) -> extendNameSetList ns (map unLoc names)
+        L _ (TypeSig _ names _) -> extendNameSetList ns (map unLoc names)
+        L _ (PatSynSig _ names _) -> extendNameSetList ns (map unLoc names)
         _ -> ns
 
 
@@ -884,10 +898,12 @@ data InstBindings a
            --          Used only to improve error messages
       }
 
-instance (SourceTextX a, OutputableBndrId a) => Outputable (InstInfo a) where
+instance (OutputableBndrId (GhcPass a))
+       => Outputable (InstInfo (GhcPass a)) where
     ppr = pprInstInfoDetails
 
-pprInstInfoDetails :: (SourceTextX a, OutputableBndrId a) => InstInfo a -> SDoc
+pprInstInfoDetails :: (OutputableBndrId (GhcPass a))
+                   => InstInfo (GhcPass a) -> SDoc
 pprInstInfoDetails info
    = hang (pprInstanceHdr (iSpec info) <+> text "where")
         2 (details (iBinds info))
