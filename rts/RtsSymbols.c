@@ -1018,6 +1018,9 @@ RTS_LIBFFI_SYMBOLS
    { #vvv, (void*)0xBAADF00D, true },
 
 RtsSymbolVal rtsSyms[] = {
+// Wasm doesn't support dynamic linking, and it complains if there is a type mismatch
+// So a simple workaround is not to declare the symbol table.
+#if !defined (wasm32_HOST_ARCH)
       RTS_SYMBOLS
       RTS_RET_SYMBOLS
       RTS_POSIX_ONLY_SYMBOLS
@@ -1035,5 +1038,6 @@ RtsSymbolVal rtsSyms[] = {
       // lazy pointers as nonlazy.
       { "dyld_stub_binding_helper", (void*)0xDEADBEEF, false },
 #endif
+#endif /* wasm32_HOST_ARCH */
       { 0, 0, false } /* sentinel */
 };
