@@ -50,6 +50,19 @@ barf(const char*s, ...)
   va_end(ap);
 }
 
+// This wrapper is added to call barf from cmm code without varargs.
+// This is a workaround to make clang generate correct calls in wasm target.
+
+void
+barf_cmm_wrapper(const char*s)
+   GNUC3_ATTRIBUTE(__noreturn__);
+
+void
+barf_cmm_wrapper(const char*s)
+{
+  barf ("%s",s);
+}
+
 void
 vbarf(const char*s, va_list ap)
 {
