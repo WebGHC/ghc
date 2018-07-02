@@ -2105,7 +2105,7 @@ write_nptrs:
 stg_waitReadzh ( W_ fd )
 {
 #if defined(THREADED_RTS)
-    ccall barf("waitRead# on threaded RTS") never returns;
+    ccall barf_cmm_wrapper("waitRead# on threaded RTS") never returns;
 #else
 
     ASSERT(StgTSO_why_blocked(CurrentTSO) == NotBlocked::I16);
@@ -2121,7 +2121,7 @@ stg_waitReadzh ( W_ fd )
 stg_waitWritezh ( W_ fd )
 {
 #if defined(THREADED_RTS)
-    ccall barf("waitWrite# on threaded RTS") never returns;
+    ccall barf_cmm_wrapper("waitWrite# on threaded RTS") never returns;
 #else
 
     ASSERT(StgTSO_why_blocked(CurrentTSO) == NotBlocked::I16);
@@ -2146,7 +2146,7 @@ stg_delayzh ( W_ us_delay )
 #endif
 
 #if defined(THREADED_RTS)
-    ccall barf("delay# on threaded RTS") never returns;
+    ccall barf_cmm_wrapper("delay# on threaded RTS") never returns;
 #else
 
     ASSERT(StgTSO_why_blocked(CurrentTSO) == NotBlocked::I16);
@@ -2208,7 +2208,7 @@ stg_asyncReadzh ( W_ fd, W_ is_sock, W_ len, W_ buf )
     CInt reqID;
 
 #if defined(THREADED_RTS)
-    ccall barf("asyncRead# on threaded RTS") never returns;
+    ccall barf_cmm_wrapper("asyncRead# on threaded RTS") never returns;
 #else
 
     ASSERT(StgTSO_why_blocked(CurrentTSO) == NotBlocked::I16);
@@ -2234,7 +2234,7 @@ stg_asyncWritezh ( W_ fd, W_ is_sock, W_ len, W_ buf )
     CInt reqID;
 
 #if defined(THREADED_RTS)
-    ccall barf("asyncWrite# on threaded RTS") never returns;
+    ccall barf_cmm_wrapper("asyncWrite# on threaded RTS") never returns;
 #else
 
     ASSERT(StgTSO_why_blocked(CurrentTSO) == NotBlocked::I16);
@@ -2260,7 +2260,7 @@ stg_asyncDoProczh ( W_ proc, W_ param )
     CInt reqID;
 
 #if defined(THREADED_RTS)
-    ccall barf("asyncDoProc# on threaded RTS") never returns;
+    ccall barf_cmm_wrapper("asyncDoProc# on threaded RTS") never returns;
 #else
 
     ASSERT(StgTSO_why_blocked(CurrentTSO) == NotBlocked::I16);
