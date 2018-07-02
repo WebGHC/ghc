@@ -274,7 +274,7 @@ eval:
         goto constructor;
     }}
 
-    ccall barf("stg_compactWorkerzh");
+    ccall barf_cmm_wrapper("stg_compactWorkerzh");
 }
 
 //
