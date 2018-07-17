@@ -1257,6 +1257,10 @@ runPhase (RealPhase cc_phase) input_fn dflags
 
         output_fn <- phaseOutputFilename next_phase
 
+        -- we create directories for the object file, because it
+        -- might be a hierarchical module.
+        liftIO $ createDirectoryIfMissing True (takeDirectory output_fn)
+
         let
           more_hcc_opts =
                 -- on x86 the floating point regs have greater precision
