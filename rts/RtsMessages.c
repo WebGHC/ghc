@@ -50,8 +50,15 @@ barf(const char*s, ...)
 }
 
 // This wrapper is added to call barf from cmm code without varargs.
-// This is a workaround to make clang generate correct calls in wasm target.
-
+// This is a workaround to make clang generate correct calls in wasm
+// target. Wasm does not directly support varargs, so Clang uses a
+// different ABI for varargs calls than normal calls, which no other
+// target does.
+//
+// https://bugs.llvm.org/show_bug.cgi?id=35385
+//
+// TODO: Replace this by allowing Cmm code to indicate where varargs
+// begin and calling `barf` correctly.
 void
 barf_cmm_wrapper(const char*s)
    GNUC3_ATTRIBUTE(__noreturn__);
