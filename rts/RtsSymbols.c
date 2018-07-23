@@ -1038,6 +1038,6 @@ RtsSymbolVal rtsSyms[] = {
       // lazy pointers as nonlazy.
       { "dyld_stub_binding_helper", (void*)0xDEADBEEF, false },
 #endif
-#endif /* wasm32_HOST_ARCH */
+#endif /* __wasm__ */
       { 0, 0, false } /* sentinel */
 };
