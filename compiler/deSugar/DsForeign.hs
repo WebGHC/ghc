@@ -728,6 +728,26 @@ toCType = f False
               = (Nothing, text "const void*")
            | Just mutableByteArrayPrimTyCon == tyConAppTyConPicky_maybe t
               = (Nothing, text "void*")
+           | Just charPrimTyCon == tyConAppTyConPicky_maybe t
+              = (Nothing, text "HsChar")
+           | Just intPrimTyCon == tyConAppTyConPicky_maybe t
+              = (Nothing, text "HsInt")
+           | Just int32PrimTyCon == tyConAppTyConPicky_maybe t
+              = (Nothing, text "HsInt32")
+           | Just int64PrimTyCon == tyConAppTyConPicky_maybe t
+              = (Nothing, text "HsInt64")
+           | Just wordPrimTyCon == tyConAppTyConPicky_maybe t
+              = (Nothing, text "HsWord")
+           | Just word32PrimTyCon == tyConAppTyConPicky_maybe t
+              = (Nothing, text "HsWord32")
+           | Just word64PrimTyCon == tyConAppTyConPicky_maybe t
+              = (Nothing, text "HsWord64")
+           | Just addrPrimTyCon == tyConAppTyConPicky_maybe t
+              = (Nothing, text "void*")
+           | Just floatPrimTyCon == tyConAppTyConPicky_maybe t
+              = (Nothing, text "HsFloat")
+           | Just doublePrimTyCon == tyConAppTyConPicky_maybe t
+              = (Nothing, text "HsDouble")
            -- Otherwise we don't know the C type. If we are allowing
            -- void then return that; otherwise something has gone wrong.
            | voidOK = (Nothing, text "void")
