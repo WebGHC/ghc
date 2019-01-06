@@ -692,7 +692,7 @@ getWanted verbose os tmpdir gccProgram gccFlags nmProgram mobjdumpProgram
              -- if it would be reasonable to fix. -flto doesn't work
              -- with the wasm lld driver yet, but it does successfully
              -- output valid LLVM bitcode. llvm-nm doesn't work on files
-             -- generated with lto, but we can use llvm-dis to inspect 
+             -- generated with lto, but we can use llvm-dis to inspect
              -- this bitcode for the same information that we would normally get via nm.
              wasmOptions = if os == "unknown_wasm" then ["-flto"] else []
          writeFile cFile cStuff
@@ -700,7 +700,7 @@ getWanted verbose os tmpdir gccProgram gccFlags nmProgram mobjdumpProgram
          xs <- case os of
                  "openbsd"      -> readProcess objdumpProgam ["--syms", oFile] ""
                  "aix"          -> readProcess objdumpProgam ["--syms", oFile] ""
-                 "unknown_wasm" -> execute verbose "llvm-dis" [oFile, "-o", "tmp.ll"] >> readProcess "cat" ["tmp.ll"] ""
+                 "unknown_wasm" -> execute verbose "wasm32-unknown-unknown-wasm-llvm-dis" [oFile, "-o", "tmp.ll"] >> readProcess "cat" ["tmp.ll"] ""
                  _              -> readProcess nmProgram ["-P", oFile] ""
 
          let ls = lines xs
@@ -994,4 +994,3 @@ execute verbose prog args
       ec <- rawSystem prog args
       unless (ec == ExitSuccess) $
           die ("Executing " ++ show prog ++ " failed")
-
