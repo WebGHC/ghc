@@ -1297,6 +1297,17 @@ LIBRARY_VERSION(ghc-compact)
 LIBRARY_ghc_VERSION="$ProjectVersion"
 AC_SUBST(LIBRARY_ghc_VERSION)
 
+AC_ARG_WITH([test-interpreter],
+[AC_HELP_STRING([--with-test-interpreter=ARG],
+  [Interpret test suite binaries with ARG [default=no]])
+],
+[
+ if test "x$withval" != "xyes"; then
+    TestInterpreter=$withval
+ fi
+])
+AC_SUBST(TestInterpreter)
+
 if grep '	' compiler/ghc.cabal.in 2>&1 >/dev/null; then
    AC_MSG_ERROR([compiler/ghc.cabal.in contains tab characters; please remove them])
 fi
@@ -1329,7 +1340,7 @@ checkMake380() {
 checkMake380 make
 checkMake380 gmake
 
-AC_CONFIG_FILES([mk/config.mk mk/install.mk mk/project.mk rts/rts.cabal compiler/ghc.cabal ghc/ghc-bin.cabal utils/iserv/iserv.cabal utils/iserv-proxy/iserv-proxy.cabal utils/runghc/runghc.cabal utils/gen-dll/gen-dll.cabal libraries/ghc-boot/ghc-boot.cabal libraries/ghc-boot-th/ghc-boot-th.cabal libraries/ghci/ghci.cabal libraries/ghc-heap/ghc-heap.cabal libraries/libiserv/libiserv.cabal settings docs/users_guide/ghc_config.py docs/index.html libraries/prologue.txt distrib/configure.ac])
+AC_CONFIG_FILES([mk/config.mk mk/install.mk mk/project.mk rts/rts.cabal compiler/ghc.cabal ghc/ghc-bin.cabal utils/iserv/iserv.cabal utils/iserv-proxy/iserv-proxy.cabal utils/runghc/runghc.cabal utils/gen-dll/gen-dll.cabal libraries/ghc-boot/ghc-boot.cabal libraries/ghc-boot-th/ghc-boot-th.cabal libraries/ghci/ghci.cabal libraries/ghc-heap/ghc-heap.cabal libraries/libiserv/libiserv.cabal settings docs/users_guide/ghc_config.py docs/index.html libraries/prologue.txt distrib/configure.ac testsuite/mk/config.mk])
 AC_OUTPUT
 [
 if test "$print_make_warning" = "true"; then

@@ -27,6 +27,8 @@ RUNTESTS     = $(TOP)/driver/runtests.py
 COMPILER     = ghc
 CONFIG       = $(TOP)/config/$(COMPILER)
 
+include $(TOP)/mk/config.mk
+
 ifeq "$(GhcUnregisterised)" "YES"
     # Otherwise C backend generates many warnings about
     # imcompatible proto casts for GCC's buitins:
@@ -245,6 +247,10 @@ ifeq "$(findstring llvm,$(BUILD_FLAVOUR))" ""
 RUNTEST_OPTS += -e config.ghc_built_by_llvm=False
 else
 RUNTEST_OPTS += -e config.ghc_built_by_llvm=True
+endif
+
+ifneq "$(TEST_INTERPRETER)" ""
+RUNTEST_OPTS += -e 'config.testInterpreter="$(TEST_INTERPRETER)"'
 endif
 
 RUNTEST_OPTS +=  \
