@@ -1153,10 +1153,15 @@ def compile_and_run__( name, way, top_mod, extra_mods, extra_hc_opts, backpack=0
         if badResult(result):
             return result
 
-        cmd = './' + name;
+        if config.testInterpreter != "":
+            cmd = config.testInterpreter
+            args = ['./' + name] + getTestOpts().extra_run_opts
+        else:
+            cmd = './' + name
+            args = getTestOpts().extra_run_opts
 
         # we don't check the compiler's stderr for a compile-and-run test
-        return simple_run( name, way, cmd, getTestOpts().extra_run_opts )
+        return simple_run( name, way, cmd, args)
 
 def compile_and_run( name, way, extra_hc_opts ):
     return compile_and_run__( name, way, '', [], extra_hc_opts)

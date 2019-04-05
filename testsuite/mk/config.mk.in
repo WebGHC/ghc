@@ -1,0 +1,2 @@
+GHC_STAGE0 := @WithGhc@
+TEST_INTERPRETER := @TestInterpreter@
