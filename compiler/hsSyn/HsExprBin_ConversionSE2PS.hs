@@ -489,7 +489,7 @@ cvMatch f (Match a b c d) = Match a
    <$> convertName b <*> traverse (traverse cvPat) c <*> cvGRHSs f d
 cvMatch _ (XMatch a) = pure (XMatch a)
 
-cvLHsPat :: LHsPat GhcSe -> Conv (LHsPat GhcPs)
+cvLHsPat :: LPat GhcSe -> Conv (LPat GhcPs)
 cvLHsPat = traverse cvPat
 
 cvPat :: Pat GhcSe -> Conv (Pat GhcPs)
