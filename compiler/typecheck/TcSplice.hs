@@ -760,6 +760,22 @@ addSpliceDeclsResult th@(L l _) resultDs = do
      resultDs
   modifyHsSpliceData $ recordSpliceResult l (SRDecls serialDecls)
 
+-- | Record the result (second argument) of evaluating the pattern splice
+--   represented by the first argument.
+addSplicePatResult :: LHsExpr GhcTc -> LHsPat GhcPs -> TcM ()
+addSplicePatResult th@(L l _) resultE = do
+  serialPat <- handleUnsupported (fmap ppr th) (Just $ ppr resultE)
+            =<< patPS2SE resultE
+  modifyHsSpliceData $ recordSpliceResult l (SRExpr serialPat)
+
+-- | Record the result (second argument) of evaluating the type splice
+--   represented by the first argument.
+addSpliceTypeResult :: LHsExpr GhcTc -> LHsType GhcPs -> TcM ()
+addSpliceTypeResult th@(L l _) resultE = do
+  serialTy <- handleUnsupported (fmap ppr th) (Just $ ppr resultE)
+          =<< tyPS2SE resultE
+  modifyHsSpliceData $ recordSpliceResult l (SRExpr serialTy)
+
 -- | Look up the result of evaluating the splice represented by the first
 --   argument in an .hs-splice file, using the given function to extract
 --   the result in question (when found).
@@ -775,15 +791,38 @@ getSpliceResult (L l _) f = do
 getSpliceExprResult :: LHsExpr GhcTc -> TcM (LHsExpr GhcPs)
 getSpliceExprResult spliceE = getSpliceResult spliceE $ \res -> case res of
     SRExpr e  -> exprSE2PS e >>= handleUnsupported (fmap ppr spliceE) Nothing
-    SRDecls _ -> panic ("Expected an expression splice but found a declaration one")
+    SRPat _   -> expectedFoundSplice "expression" "pattern"
+    SRTy _    -> expectedFoundSplice "expression" "type"
+    SRDecls _ -> expectedFoundSplice "expression" "declarations"
+
+-- | Look up the result of evaluating a pattern splice.
+getSplicePatResult :: LHsExpr GhcTc -> TcM (LHsPat GhcPs)
+getSplicePatResult spliceE = getSpliceResult spliceE $ \res -> case res of
+    SRPat e   -> patSE2PS e >>= handleUnsupported (fmap ppr spliceE) Nothing
+    SRExpr _  -> expectedFoundSplice "pattern" "expression"
+    SRTy _    -> expectedFoundSplice "pattern" "type"
+    SRDecls _ -> expectedFoundSplice "pattern" "declarations"
+
+-- | Look up the result of evaluating a type splice.
+getSpliceTypeResult :: LHsExpr GhcTc -> TcM (LHsType GhcPs)
+getSpliceTypeResult spliceE = getSpliceResult spliceE $ \res -> case res of
+    SRTy e    -> tySE2PS e >>= handleUnsupported (fmap ppr spliceE) Nothing
+    SRExpr _  -> expectedFoundSplice "type" "expression"
+    SRPat _   -> expectedFoundSplice "type" "pattern"
+    SRDecls _ -> expectedFoundSplice "type" "declarations"
 
 -- | Look up the result of evaluating a declaration splice.
 getSpliceDeclsResult :: LHsExpr GhcTc -> TcM [LHsDecl GhcPs]
 getSpliceDeclsResult spliceE = getSpliceResult spliceE $ \res -> case res of
-    SRExpr _   -> panic ("Expected a declaration splice result but found an expression one")
+    SRExpr _   -> expectedFoundSplice "declarations" "expression"
+    SRPat _    -> expectedFoundSplice "declarations" "pattern"
+    SRTy _     -> expectedFoundSplice "delcarations" "type"
     SRDecls ds -> traverse
       (declSE2PS >=> handleUnsupported (fmap ppr spliceE) Nothing)
       ds
+
+expectedFoundSplice exp found =
+  panic ("Expected a " ++ exp ++ " splice result but found: " ++ found)
 
 runMetaAW :: LHsExpr GhcTc         -- Of type AnnotationWrapper
           -> TcM Serialized
@@ -801,15 +840,11 @@ runMetaE = runMeta metaRequestE getSpliceExprResult addSpliceExprResult
 
 runMetaP :: LHsExpr GhcTc          -- Of type (Q Pat)
          -> TcM (LPat GhcPs)
-runMetaP = runMeta metaRequestP
-  (panic "runMetaP doesn't support splice caching (read)")
-  (panic "runMetaP doesn't support splice caching (write)")
+runMetaP = runMeta metaRequestP getSplicePatResult addSplicePatResult
 
 runMetaT :: LHsExpr GhcTc          -- Of type (Q Type)
          -> TcM (LHsType GhcPs)
-runMetaT = runMeta metaRequestT
-  (panic "runMetaT doesn't support splice caching (read)")
-  (panic "runMetaT doesn't support splice caching (write)")
+runMetaT = runMeta metaRequestT getSpliceTypeResult addSpliceTypeResult
 
 runMetaD :: LHsExpr GhcTc          -- Of type Q [Dec]
          -> TcM [LHsDecl GhcPs]

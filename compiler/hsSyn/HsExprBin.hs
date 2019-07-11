@@ -80,17 +80,22 @@ nonEmptyHsSpliceData = not . Map.null . hsSpliceMap
 data SpliceResult
   = SRExpr  (LHsExpr GhcSe)
   | SRDecls [LHsDecl GhcSe] -- TODO: change to HsGroup ?
-  -- TODO: add patterns and types?
+  | SRPat   (LHsPat GhcSe)
+  | SRTy    (LHsType GhcSe)
 
 instance Binary SpliceResult where
   put_ bh r = case r of
     SRExpr e -> putByte bh 0 >> put_ bh e
     SRDecls ds -> putByte bh 1 >> put_ bh ds
+    SRPat p -> putByte bh 2 >> put_ bh p
+    SRTy t  -> putByte bh 3 >> put_ bh t
   get bh = do
     tag <- getByte bh
     case tag of
       0 -> SRExpr <$> get bh
       1 -> SRDecls <$> get bh
+      2 -> SRPat <$> get bh
+      3 -> SRTy <$> get bh
       _ -> panic "Binary SpliceResult: unknown tag"
 
 instance Binary HsSpliceData where
@@ -115,6 +120,14 @@ exprSE2PS = runConv . SE2PS.cvLHsExpr
 declSE2PS :: LHsDecl GhcSe -> RnM (ConvResult (LHsDecl GhcPs))
 declSE2PS = runConv . SE2PS.cvLHsDecl
 
+-- | Convert a serialisable pattern AST to a parsed pattern AST
+patSE2PS :: LHsPat GhcSe -> RnM (ConvResult (LHsPat GhcPs))
+patSE2PS = runConv . SE2PS.cvLHsPat
+
+-- | Convert a serialisable type AST to a parsed type ST
+tySE2PS :: LHsType GhcSe -> RnM (ConvResult (LHsType GhcPs))
+tySE2PS = runConv . SE2PS.cvLHsType
+
 -- Converting Ps -> Se
 
 -- | Convert a parsed expression AST to a serialisable expression AST
@@ -124,6 +137,14 @@ exprPS2SE = runConv . PS2SE.cvLHsExpr
 -- | Convert a parsed declaration AST to a serialisable expression AST
 declPS2SE :: LHsDecl GhcPs -> RnM (ConvResult (LHsDecl GhcSe))
 declPS2SE = runConv . PS2SE.cvLHsDecl
+
+-- | Convert a serialisable pattern AST to a parsed pattern AST
+patPS2SE :: LHsPat GhcPs -> RnM (ConvResult (LHsPat GhcSe))
+patPS2SE = runConv . PS2SE.cvLHsPat
+
+-- | Convert a serialisable type AST to a parsed type ST
+tyPS2SE :: LHsType GhcPs -> RnM (ConvResult (LHsType GhcSe))
+tyPS2SE = runConv . PS2SE.cvLHsType
 
 -- * Error reporting
 

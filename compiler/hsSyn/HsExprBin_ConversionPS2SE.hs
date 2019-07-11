@@ -488,6 +488,9 @@ cvMatch f (Match a b c d) = Match a
    <$> convertName b <*> traverse (traverse cvPat) c <*> cvGRHSs f d
 cvMatch _ (XMatch a) = pure (XMatch a)
 
+cvLHsPat :: LHsPat GhcPs -> Conv (LHsPat GhcSe)
+cvLHsPat = traverse cvPat
+
 cvPat :: Pat GhcPs -> Conv (Pat GhcSe)
 cvPat (WildPat a) = pure (WildPat a)
 cvPat (VarPat a b) = VarPat a <$> convertName b
@@ -703,6 +706,9 @@ cvHsImplicitBndrs
   -> Conv (HsImplicitBndrs GhcSe thing')
 cvHsImplicitBndrs f (HsIB a b) = HsIB a <$> f b
 cvHsImplicitBndrs _ (XHsImplicitBndrs a) = pure (XHsImplicitBndrs a)
+
+cvLHsType :: LHsType GhcPs -> Conv (HsType GhcSe)
+cvLHsType = traverse cvType
 
 cvType :: HsType GhcPs -> Conv (HsType GhcSe)
 cvType (HsForAllTy a b c) = HsForAllTy a
