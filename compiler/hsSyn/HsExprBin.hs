@@ -9,8 +9,12 @@ module HsExprBin
   , lookupSpliceResult
   , exprSE2PS
   , declSE2PS
+  , patSE2PS
+  , tySE2PS
   , exprPS2SE
   , declPS2SE
+  , patPS2SE
+  , tyPS2SE
   , handleUnsupported
   ) where
 
