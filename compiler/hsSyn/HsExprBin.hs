@@ -27,6 +27,8 @@ import qualified HsExprBin_ConversionSE2PS as SE2PS
 import qualified HsExprBin_ConversionPS2SE as PS2SE
 import HsExprBin_Instances ()
 import HsExtension
+import HsPat
+import HsTypes
 import Module
 import Outputable
 import SrcLoc
@@ -84,7 +86,7 @@ nonEmptyHsSpliceData = not . Map.null . hsSpliceMap
 data SpliceResult
   = SRExpr  (LHsExpr GhcSe)
   | SRDecls [LHsDecl GhcSe] -- TODO: change to HsGroup ?
-  | SRPat   (LHsPat GhcSe)
+  | SRPat   (LPat GhcSe)
   | SRTy    (LHsType GhcSe)
 
 instance Binary SpliceResult where
@@ -125,7 +127,7 @@ declSE2PS :: LHsDecl GhcSe -> RnM (ConvResult (LHsDecl GhcPs))
 declSE2PS = runConv . SE2PS.cvLHsDecl
 
 -- | Convert a serialisable pattern AST to a parsed pattern AST
-patSE2PS :: LHsPat GhcSe -> RnM (ConvResult (LHsPat GhcPs))
+patSE2PS :: LPat GhcSe -> RnM (ConvResult (LPat GhcPs))
 patSE2PS = runConv . SE2PS.cvLHsPat
 
 -- | Convert a serialisable type AST to a parsed type ST
@@ -143,7 +145,7 @@ declPS2SE :: LHsDecl GhcPs -> RnM (ConvResult (LHsDecl GhcSe))
 declPS2SE = runConv . PS2SE.cvLHsDecl
 
 -- | Convert a serialisable pattern AST to a parsed pattern AST
-patPS2SE :: LHsPat GhcPs -> RnM (ConvResult (LHsPat GhcSe))
+patPS2SE :: LPat GhcPs -> RnM (ConvResult (LPat GhcSe))
 patPS2SE = runConv . PS2SE.cvLHsPat
 
 -- | Convert a serialisable type AST to a parsed type ST

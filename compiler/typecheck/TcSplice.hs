@@ -762,11 +762,11 @@ addSpliceDeclsResult th@(L l _) resultDs = do
 
 -- | Record the result (second argument) of evaluating the pattern splice
 --   represented by the first argument.
-addSplicePatResult :: LHsExpr GhcTc -> LHsPat GhcPs -> TcM ()
+addSplicePatResult :: LHsExpr GhcTc -> LPat GhcPs -> TcM ()
 addSplicePatResult th@(L l _) resultE = do
   serialPat <- handleUnsupported (fmap ppr th) (Just $ ppr resultE)
             =<< patPS2SE resultE
-  modifyHsSpliceData $ recordSpliceResult l (SRExpr serialPat)
+  modifyHsSpliceData $ recordSpliceResult l (SRPat serialPat)
 
 -- | Record the result (second argument) of evaluating the type splice
 --   represented by the first argument.
@@ -774,7 +774,7 @@ addSpliceTypeResult :: LHsExpr GhcTc -> LHsType GhcPs -> TcM ()
 addSpliceTypeResult th@(L l _) resultE = do
   serialTy <- handleUnsupported (fmap ppr th) (Just $ ppr resultE)
           =<< tyPS2SE resultE
-  modifyHsSpliceData $ recordSpliceResult l (SRExpr serialTy)
+  modifyHsSpliceData $ recordSpliceResult l (SRTy serialTy)
 
 -- | Look up the result of evaluating the splice represented by the first
 --   argument in an .hs-splice file, using the given function to extract
@@ -796,7 +796,7 @@ getSpliceExprResult spliceE = getSpliceResult spliceE $ \res -> case res of
     SRDecls _ -> expectedFoundSplice "expression" "declarations"
 
 -- | Look up the result of evaluating a pattern splice.
-getSplicePatResult :: LHsExpr GhcTc -> TcM (LHsPat GhcPs)
+getSplicePatResult :: LHsExpr GhcTc -> TcM (LPat GhcPs)
 getSplicePatResult spliceE = getSpliceResult spliceE $ \res -> case res of
     SRPat e   -> patSE2PS e >>= handleUnsupported (fmap ppr spliceE) Nothing
     SRExpr _  -> expectedFoundSplice "pattern" "expression"
@@ -821,6 +821,7 @@ getSpliceDeclsResult spliceE = getSpliceResult spliceE $ \res -> case res of
       (declSE2PS >=> handleUnsupported (fmap ppr spliceE) Nothing)
       ds
 
+expectedFoundSplice :: String -> String -> a
 expectedFoundSplice exp found =
   panic ("Expected a " ++ exp ++ " splice result but found: " ++ found)
 

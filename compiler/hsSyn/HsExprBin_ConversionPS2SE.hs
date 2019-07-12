@@ -707,7 +707,7 @@ cvHsImplicitBndrs
 cvHsImplicitBndrs f (HsIB a b) = HsIB a <$> f b
 cvHsImplicitBndrs _ (XHsImplicitBndrs a) = pure (XHsImplicitBndrs a)
 
-cvLHsType :: LHsType GhcPs -> Conv (HsType GhcSe)
+cvLHsType :: Traversable t => t (HsType GhcPs) -> Conv (t (HsType GhcSe))
 cvLHsType = traverse cvType
 
 cvType :: HsType GhcPs -> Conv (HsType GhcSe)
