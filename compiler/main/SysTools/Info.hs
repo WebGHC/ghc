@@ -142,7 +142,7 @@ getLinkerInfo' dflags = do
           return (GnuGold [Option "-Wl,--no-as-needed"])
 
         | any ("LLD" `isPrefixOf`) stdo =
-          return (LlvmLLD $ map Option [
+          return (LlvmLLD $ map Option $ if os == OSWasm then [] else [
                                       -- see Note [ELF needed shared libs]
                                       "-Wl,--no-as-needed"])
 
