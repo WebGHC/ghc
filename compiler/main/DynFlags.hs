@@ -5783,7 +5783,7 @@ defaultGlobalDynFlags =
     llvmTargets = panic "v_unsafeGlobalDynFlags: llvmTargets not initialised"
     llvmPasses = panic "v_unsafeGlobalDynFlags: llvmPasses not initialised"
 
-#if STAGE < 2
+#if STAGE < 2 || !defined(GHCI)
 GLOBAL_VAR(v_unsafeGlobalDynFlags, defaultGlobalDynFlags, DynFlags)
 #else
 SHARED_GLOBAL_VAR( v_unsafeGlobalDynFlags
