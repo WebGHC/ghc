@@ -748,6 +748,8 @@ toCType = f False
               = (Nothing, text "HsFloat")
            | Just doublePrimTyCon == tyConAppTyConPicky_maybe t
               = (Nothing, text "HsDouble")
+           | Just stablePtrPrimTyCon == tyConAppTyConPicky_maybe t
+              = (Nothing, text "HsStablePtr")
            -- Otherwise we don't know the C type. If we are allowing
            -- void then return that; otherwise something has gone wrong.
            | voidOK = (Nothing, text "void")
