@@ -47,6 +47,9 @@ TARGETS=(
 
     # FreeBSD ARM
     "aarch64-unknown-freebsd" "armv6-unknown-freebsd-gnueabihf" "armv7-unknown-freebsd-gnueabihf"
+
+    # Wasm
+    "wasm32-unknown-unknown-wasm"
 )
 
 # given the call to clang -c11 that clang --target -v generates,
