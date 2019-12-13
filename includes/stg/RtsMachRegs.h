@@ -14,7 +14,7 @@
 
 #pragma once
 
-#if defined(UnregisterisedCompiler)
+#if defined(UnregisterisedCompiler) || defined(unknown_wasm_HOST_OS)
 #if !defined(NO_REGS)
 #define NO_REGS
 #endif

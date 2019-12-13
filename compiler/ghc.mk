@@ -353,10 +353,7 @@ ifeq "$(TargetOS_CPP)" "openbsd"
 compiler_CONFIGURE_OPTS += --ld-options=-E
 endif
 
-ifeq "$(GhcUnregisterised)" "NO"
-else
 compiler_CONFIGURE_OPTS += --ghc-option=-DNO_REGS
-endif
 
 ifneq "$(GhcWithSMP)" "YES"
 compiler_CONFIGURE_OPTS += --ghc-option=-DNOSMP

@@ -25,5 +25,6 @@ Executable genapply
     Build-Depends: base       >= 3   && < 5,
                    pretty
 
+    Cpp-Options: -DNO_REGS
     if flag(unregisterised)
         Cpp-Options: -DNO_REGS
