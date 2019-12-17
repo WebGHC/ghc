@@ -198,7 +198,7 @@ initSysTools top_dir
        cpp_args_str <- getSetting "Haskell CPP flags"
        let unreg_gcc_args = if targetUnregisterised
                             then ["-DNO_REGS", "-DUSE_MINIINTERPRETER"]
-                            else ["-DNO_REGS"]
+                            else []
            -- TABLES_NEXT_TO_CODE affects the info table layout.
            tntc_gcc_args
             | mkTablesNextToCode targetUnregisterised
