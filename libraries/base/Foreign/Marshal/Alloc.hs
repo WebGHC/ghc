@@ -1,6 +1,6 @@
 {-# LANGUAGE Trustworthy #-}
 {-# LANGUAGE NoImplicitPrelude, MagicHash, UnboxedTuples,
-             ScopedTypeVariables #-}
+             ScopedTypeVariables, CApiFFI #-}
 
 -----------------------------------------------------------------------------
 -- |
@@ -228,5 +228,5 @@ foreign import ccall unsafe "stdlib.h free"    _free    :: Ptr a -> IO ()
 -- | A pointer to a foreign function equivalent to 'free', which may be
 -- used as a finalizer (cf 'Foreign.ForeignPtr.ForeignPtr') for storage
 -- allocated with 'malloc', 'mallocBytes', 'realloc' or 'reallocBytes'.
-foreign import ccall unsafe "stdlib.h &free" finalizerFree :: FinalizerPtr a
+foreign import capi unsafe "static stdlib.h value free" finalizerFree :: FinalizerPtr a
 
