@@ -374,7 +374,7 @@ SplitObjs = $(if $(and $(filter YES,$(SupportsSplitObjs)),\
 OsSupportsSplitSections=$(if $(filter $(TargetOS_CPP),darwin),NO,YES)
 SupportsSplitSections=$(if $(and $(filter YES,$(OsSupportsSplitSections)),\
                                    $(filter YES,$(LdIsGNULd))),YES,NO)
-SplitSections ?= $(SupportsSplitSections)
+SplitSections ?= YES
 
 # ----------------------------------------------------------------------------
 

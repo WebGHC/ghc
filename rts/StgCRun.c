@@ -29,7 +29,7 @@
 #include "PosixSource.h"
 #include "ghcconfig.h"
 
-#if defined(sparc_HOST_ARCH) || defined(USE_MINIINTERPRETER)
+#if defined(sparc_HOST_ARCH) || defined(USE_MINIINTERPRETER) || defined(unknown_wasm_HOST_OS)
 /* include Stg.h first because we want real machine regs in here: we
  * have to get the value of R1 back from Stg land to C land intact.
  */
@@ -70,22 +70,15 @@
    any architecture (using miniinterpreter)
    -------------------------------------------------------------------------- */
 
-StgRegTable * StgRun(StgFunPtr f, StgRegTable *basereg STG_UNUSED)
+StgRegTable * StgRun(void (*f) (void), StgRegTable *basereg STG_UNUSED)
 {
-    while (f) {
-        IF_DEBUG(interpreter,
-                 debugBelch("Jumping to ");
-                 printPtr((P_)f); fflush(stdout);
-                 debugBelch("\n");
-                 );
-        f = (StgFunPtr) (f)();
-    }
+    (*f) ();
     return (StgRegTable *)R1.p;
 }
 
-StgFunPtr StgReturn(void)
+void StgReturn(void)
 {
-    return 0;
+    return;
 }
 
 #else /* !USE_MINIINTERPRETER */
@@ -1009,6 +1002,20 @@ StgRun(StgFunPtr f, StgRegTable *basereg) {
     return r;
 }
 
+#endif
+
+#if defined(unknown_wasm_HOST_OS)
+
+StgRegTable * StgRun(void (*f) (void), StgRegTable *basereg STG_UNUSED)
+{
+  (*f) ();
+  return (StgRegTable *)R1.p;
+}
+
+void StgReturn(void)
+{
+  return;
+}
 #endif
 
 #endif /* !USE_MINIINTERPRETER */

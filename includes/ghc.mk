@@ -39,9 +39,9 @@ includes_CC_OPTS += $(SRC_CC_OPTS)
 includes_CC_OPTS += $(SRC_CC_WARNING_OPTS)
 includes_CC_OPTS += $(CONF_CC_OPTS_STAGE1)
 
-ifeq "$(GhcUnregisterised)" "YES"
+# ifeq "$(GhcUnregisterised)" "YES"
 includes_CC_OPTS += -DUSE_MINIINTERPRETER
-endif
+# endif
 
 includes_CC_OPTS += $(addprefix -I,$(GHC_INCLUDE_DIRS))
 includes_CC_OPTS += -Irts

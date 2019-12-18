@@ -32,7 +32,7 @@ import GHC.Float
 data LMGlobal = LMGlobal {
   getGlobalVar :: LlvmVar,          -- ^ Returns the variable of the 'LMGlobal'
   getGlobalValue :: Maybe LlvmStatic -- ^ Return the value of the 'LMGlobal'
-  }
+  } | LMGlobalExternalFunc LlvmFunctionDecl
 
 -- | A String in LLVM
 type LMString = FastString
@@ -622,7 +622,7 @@ instance Outputable LlvmCallConvention where
   ppr CC_Ccc       = text "ccc"
   ppr CC_Fastcc    = text "fastcc"
   ppr CC_Coldcc    = text "coldcc"
-  ppr CC_Ghc       = text "ghccc"
+  ppr CC_Ghc       = empty
   ppr (CC_Ncc i)   = text "cc " <> ppr i
   ppr CC_X86_Stdcc = text "x86_stdcallcc"
 

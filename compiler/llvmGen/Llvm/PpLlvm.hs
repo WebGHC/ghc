@@ -91,6 +91,7 @@ ppLlvmGlobal (LMGlobal var val) = sdocWithDynFlags $ \dflags ->
   error $ "Non Global var ppr as global! "
           ++ showSDoc dflags (ppr var) ++ " " ++ showSDoc dflags (ppr val)
 
+ppLlvmGlobal (LMGlobalExternalFunc func) = ppLlvmFunctionDecl func
 
 -- | Print out a list of LLVM type aliases.
 ppLlvmAliases :: [LlvmAlias] -> SDoc
@@ -267,7 +268,7 @@ ppCall ct fptr args attrs = case fptr of
 
     where
         ppCall' (LlvmFunctionDecl _ _ cc ret argTy params _) =
-            let tc = if ct == TailCall then text "tail " else empty
+            let tc = if ct == TailCall then text "musttail " else empty
                 ppValues = hsep $ punctuate comma $ map ppCallMetaExpr args
                 ppArgTy  = (ppCommaJoin $ map fst params) <>
                            (case argTy of

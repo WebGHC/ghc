@@ -40,7 +40,7 @@ import Control.Monad.Trans.Writer
 
 import qualified Data.Semigroup as Semigroup
 import Data.List ( nub )
-import Data.Maybe ( catMaybes )
+import Data.Maybe ( catMaybes, isJust )
 
 type Atomic = Bool
 type LlvmStatements = OrdList LlvmStatement
@@ -215,7 +215,7 @@ genCall t@(PrimTarget (MO_Prefetch_Data localityInt)) [] args
     let (_, arg_hints) = foreignTargetHints t
     let args_hints' = zip args arg_hints
     argVars <- arg_varsW args_hints' ([], nilOL, [])
-    fptr    <- liftExprData $ getFunPtr funTy t
+    fptr    <- liftExprData $ getFunPtr funTy t Nothing
     argVars' <- castVarsW Signed $ zip argVars argTy
 
     doTrashStmts
@@ -298,7 +298,7 @@ genCall t@(PrimTarget op) [] args
     let (_, arg_hints) = foreignTargetHints t
     let args_hints = zip args arg_hints
     argVars       <- arg_varsW args_hints ([], nilOL, [])
-    fptr          <- getFunPtrW funTy t
+    fptr          <- getFunPtrW funTy t Nothing
     argVars' <- castVarsW Signed $ zip argVars argTy
 
     doTrashStmts
@@ -445,12 +445,12 @@ genCall target res args = runStmtsDecls $ do
     let ccTy  = StdCall -- tail calls should be done through CmmJump
     let retTy = ret_type ress_hints
     let argTy = tysToParams $ map arg_type args_hints
-    let funTy = \name -> LMFunction $ LlvmFunctionDecl name ExternallyVisible
+    let funTy = \name -> LlvmFunctionDecl name ExternallyVisible
                              lmconv retTy FixedArgs argTy (llvmFunAlign dflags)
 
 
     argVars <- arg_varsW args_hints ([], nilOL, [])
-    fptr    <- getFunPtrW funTy target
+    fptr    <- getFunPtrW (\name -> LMFunction $ funTy name) target (Just funTy)
 
     let doReturn | ccTy == TailCall  = statement $ Return Nothing
                  | never_returns     = statement $ Unreachable
@@ -621,17 +621,17 @@ genCallSimpleCast2 _ _ dsts _ =
     panic ("genCallSimpleCast2: " ++ show (length dsts) ++ " dsts")
 
 -- | Create a function pointer from a target.
-getFunPtrW :: (LMString -> LlvmType) -> ForeignTarget
+getFunPtrW :: (LMString -> LlvmType) -> ForeignTarget -> Maybe (LMString -> LlvmFunctionDecl)
            -> WriterT LlvmAccum LlvmM LlvmVar
-getFunPtrW funTy targ = liftExprData $ getFunPtr funTy targ
+getFunPtrW funTy targ mFunDecl = liftExprData $ getFunPtr funTy targ mFunDecl
 
 -- | Create a function pointer from a target.
-getFunPtr :: (LMString -> LlvmType) -> ForeignTarget
+getFunPtr :: (LMString -> LlvmType) -> ForeignTarget -> Maybe (LMString -> LlvmFunctionDecl)
           -> LlvmM ExprData
-getFunPtr funTy targ = case targ of
+getFunPtr funTy targ mFunDecl = case targ of
     ForeignTarget (CmmLit (CmmLabel lbl)) _ -> do
         name <- strCLabel_llvm lbl
-        getHsFunc' name (funTy name)
+        getHsFunc' name (funTy name) (fmap (\f -> f name) mFunDecl)
 
     ForeignTarget expr _ -> do
         (v1, stmts, top) <- exprToVar expr
@@ -1737,7 +1737,7 @@ genLit opt (CmmVec ls)
           _ -> panic "genLit"
 
 genLit _ cmm@(CmmLabel l)
-  = do var <- getGlobalPtr =<< strCLabel_llvm l
+  = do var <- (flip getGlobalPtr Nothing) =<< strCLabel_llvm l
        dflags <- getDynFlags
        let lmty = cmmToLlvmType $ cmmLitType dflags cmm
        (v1, s1) <- doExpr lmty $ Cast LM_Ptrtoint var (llvmWord dflags)
@@ -1891,14 +1891,14 @@ getTrashRegs = do plat <- getLlvmPlatform
 -- with foreign functions.
 getHsFunc :: LiveGlobalRegs -> CLabel -> LlvmM ExprData
 getHsFunc live lbl
-  = do fty <- llvmFunTy live
+  = do fty <- llvmFunSig live lbl ExternallyVisible
        name <- strCLabel_llvm lbl
-       getHsFunc' name fty
+       getHsFunc' name (LMFunction fty) (Just fty)
 
-getHsFunc' :: LMString -> LlvmType -> LlvmM ExprData
-getHsFunc' name fty
-  = do fun <- getGlobalPtr name
-       if getVarType fun == fty
+getHsFunc' :: LMString -> LlvmType -> Maybe LlvmFunctionDecl -> LlvmM ExprData
+getHsFunc' name fty mFunDecl
+  = do fun <- getGlobalPtr name mFunDecl
+       if getVarType fun == fty || isJust mFunDecl
          then return (fun, nilOL, [])
          else do (v1, s1) <- doExpr (pLift fty)
                                $ Cast LM_Bitcast fun (pLift fty)
