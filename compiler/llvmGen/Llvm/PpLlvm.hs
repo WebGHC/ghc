@@ -91,6 +91,7 @@ ppLlvmGlobal (LMGlobal var val) = sdocWithDynFlags $ \dflags ->
   error $ "Non Global var ppr as global! "
           ++ showSDoc dflags (ppr var) ++ " " ++ showSDoc dflags (ppr val)
 
+ppLlvmGlobal (LMGlobalExternalFunc func) = ppLlvmFunctionDecl func
 
 -- | Print out a list of LLVM type aliases.
 ppLlvmAliases :: [LlvmAlias] -> SDoc

@@ -32,7 +32,7 @@ import GHC.Float
 data LMGlobal = LMGlobal {
   getGlobalVar :: LlvmVar,          -- ^ Returns the variable of the 'LMGlobal'
   getGlobalValue :: Maybe LlvmStatic -- ^ Return the value of the 'LMGlobal'
-  }
+  } | LMGlobalExternalFunc LlvmFunctionDecl
 
 -- | A String in LLVM
 type LMString = FastString

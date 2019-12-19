@@ -58,6 +58,9 @@ import ErrUtils
 import qualified Stream
 
 import Control.Monad (ap)
+import Data.Map (Map)
+import qualified Data.Map as Map
+import Data.Maybe (fromMaybe)
 
 -- ----------------------------------------------------------------------------
 -- * Some Data Types
@@ -209,7 +212,7 @@ data LlvmEnv = LlvmEnv
   , envFreshMeta :: MetaId         -- ^ Supply of fresh metadata IDs
   , envUniqMeta :: UniqFM MetaId   -- ^ Global metadata nodes
   , envFunMap :: LlvmEnvMap        -- ^ Global functions so far, with type
-  , envAliases :: UniqSet LMString -- ^ Globals that we had to alias, see [Llvm Forward References]
+  , envAliases :: Map LMString (Maybe LlvmFunctionDecl) -- ^ Globals that we had to alias, see [Llvm Forward References]
   , envUsedVars :: [LlvmVar]       -- ^ Pointers to be added to llvm.used (see @cmmUsedLlvmGens@)
 
     -- the following get cleared for every function (see @withClearVars@)
@@ -264,7 +267,7 @@ runLlvm dflags ver out us m = do
                       , envVarMap = emptyUFM
                       , envStackRegs = []
                       , envUsedVars = []
-                      , envAliases = emptyUniqSet
+                      , envAliases = mempty
                       , envVersion = ver
                       , envDynFlags = dflags
                       , envOutput = out
@@ -360,8 +363,8 @@ getUsedVars = getEnv envUsedVars
 
 -- | Saves that at some point we didn't know the type of the label and
 -- generated a reference to a type variable instead
-saveAlias :: LMString -> LlvmM ()
-saveAlias lbl = modifyEnv $ \env -> env { envAliases = addOneToUniqSet (envAliases env) lbl }
+saveAlias :: LMString -> Maybe LlvmFunctionDecl -> LlvmM ()
+saveAlias lbl mFunDecl = modifyEnv $ \env -> env { envAliases = Map.insert lbl mFunDecl (envAliases env) }
 
 -- | Sets metadata node for a given unique
 setUniqMeta :: Unique -> MetaId -> LlvmM ()
@@ -443,16 +446,16 @@ strProcedureName_llvm lbl = do
 -- | Create/get a pointer to a global value. Might return an alias if
 -- the value in question hasn't been defined yet. We especially make
 -- no guarantees on the type of the returned pointer.
-getGlobalPtr :: LMString -> LlvmM LlvmVar
-getGlobalPtr llvmLbl = do
+getGlobalPtr :: LMString -> Maybe LlvmFunctionDecl -> LlvmM LlvmVar
+getGlobalPtr llvmLbl mFunDecl = do
   m_ty <- funLookup llvmLbl
-  let mkGlbVar lbl ty = LMGlobalVar lbl (LMPointer ty) Private Nothing Nothing
+  let mkGlbVar lbl ty = LMGlobalVar lbl (maybe (LMPointer ty) LMFunction mFunDecl) Private Nothing Nothing
   case m_ty of
     -- Directly reference if we have seen it already
     Just ty -> return $ mkGlbVar (llvmLbl `appendFS` fsLit "$def") ty Global
     -- Otherwise use a forward alias of it
     Nothing -> do
-      saveAlias llvmLbl
+      saveAlias llvmLbl mFunDecl
       return $ mkGlbVar llvmLbl i8 Alias
 
 -- | Generate definitions for aliases forward-referenced by @getGlobalPtr@.
@@ -461,11 +464,11 @@ getGlobalPtr llvmLbl = do
 -- will be generated anymore!
 generateExternDecls :: LlvmM ([LMGlobal], [LlvmType])
 generateExternDecls = do
-  delayed <- fmap nonDetEltsUniqSet $ getEnv envAliases
+  delayed <- fmap Map.toList $ getEnv envAliases
   -- This is non-deterministic but we do not
   -- currently support deterministic code-generation.
   -- See Note [Unique Determinism and code generation]
-  defss <- flip mapM delayed $ \lbl -> do
+  defss <- flip mapM delayed $ \(lbl, mTy) -> do
     m_ty <- funLookup lbl
     case m_ty of
       -- If we have a definition we've already emitted the proper aliases
@@ -476,10 +479,10 @@ generateExternDecls = do
       -- need to emit a declaration
       Nothing ->
         let var = LMGlobalVar lbl i8Ptr External Nothing Nothing Global
-        in return [LMGlobal var Nothing]
+        in return [maybe (LMGlobal var Nothing) LMGlobalExternalFunc mTy]
 
   -- Reset forward list
-  modifyEnv $ \env -> env { envAliases = emptyUniqSet }
+  modifyEnv $ \env -> env { envAliases = mempty }
   return (concat defss, [])
 
 -- | Here we take a global variable definition, rename it with a
