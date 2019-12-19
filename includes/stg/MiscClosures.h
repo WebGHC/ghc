@@ -25,14 +25,14 @@
 #  define RTS_THUNK_INFO(i) extern const W_(i)[]
 #  define RTS_INFO(i)       extern const W_(i)[]
 #  define RTS_CLOSURE(i)    extern W_(i)[]
-#  define RTS_FUN_DECL(f)   extern DLL_IMPORT_RTS StgFunPtr f(void)
+#  define RTS_FUN_DECL(f)   extern DLL_IMPORT_RTS void f(void)
 #else
 #  define RTS_RET_INFO(i)   extern DLL_IMPORT_RTS const StgRetInfoTable i
 #  define RTS_FUN_INFO(i)   extern DLL_IMPORT_RTS const StgFunInfoTable i
 #  define RTS_THUNK_INFO(i) extern DLL_IMPORT_RTS const StgThunkInfoTable i
 #  define RTS_INFO(i)       extern DLL_IMPORT_RTS const StgInfoTable i
 #  define RTS_CLOSURE(i)    extern DLL_IMPORT_RTS StgClosure i
-#  define RTS_FUN_DECL(f)   extern DLL_IMPORT_RTS StgFunPtr f(void)
+#  define RTS_FUN_DECL(f)   extern DLL_IMPORT_RTS void f(void)
 #endif
 
 #if defined(TABLES_NEXT_TO_CODE)

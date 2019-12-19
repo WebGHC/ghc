@@ -183,5 +183,9 @@ typedef StgWord8*          StgByteArray;
   C only allows that if you're defining a struct or union.
 */
 
+#if defined(unknown_wasm_HOST_OS)
+typedef void  (*StgFunPtr)(void);
+#else
 typedef void  *(*(*StgFunPtr)(void))(void);
+#endif
 typedef StgFunPtr StgFun(void);
