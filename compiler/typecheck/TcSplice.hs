@@ -26,6 +26,7 @@ module TcSplice(
      runMetaE, runMetaP, runMetaT, runMetaD, runQuasi,
      tcTopSpliceExpr, lookupThName_maybe,
      defaultRunMeta, runMeta', runRemoteModFinalizers,
+     readHsSpliceData, writeHsSpliceData,
      finishTH
       ) where
 
@@ -34,6 +35,7 @@ module TcSplice(
 import GhcPrelude
 
 import HsSyn
+import HsExprBin
 import Annotations
 import Finder
 import Name
@@ -110,6 +112,9 @@ import Maybes( MaybeErr(..) )
 import DynFlags
 import Panic
 import Lexeme
+import BinIface ( getWithUserData, putWithUserData )
+import IfaceEnv ( NameCacheUpdater(..) )
+import qualified Binary as Bin
 import qualified EnumSet
 import Plugins
 import Bag
@@ -132,6 +137,7 @@ import Data.Typeable ( typeOf, Typeable, TypeRep, typeRep )
 import Data.Data (Data)
 import Data.Proxy    ( Proxy (..) )
 import GHC.Exts         ( unsafeCoerce# )
+import System.Directory ( doesFileExist )
 
 {-
 ************************************************************************
@@ -672,12 +678,26 @@ runQResult show_th f runQ expr_span hval
 
 
 -----------------
+
 runMeta :: (MetaHook TcM -> LHsExpr GhcTc -> TcM hs_syn)
+        -> (LHsExpr GhcTc -> TcM hs_syn)
+           -- ^ function to load the result of the given expression from
+           --   an .hs-splice file's data
+        -> (LHsExpr GhcTc -> hs_syn -> TcM ())
+           -- ^ function to "save" the result (hs_syn) of evaluating the given
+           --   LHsExpr
         -> LHsExpr GhcTc
         -> TcM hs_syn
-runMeta unwrap e
-  = do { h <- getHooked runMetaHook defaultRunMeta
-       ; unwrap h e }
+runMeta unwrap loadSpliceFun saveSpliceFun e
+  = do { dflags <- getDynFlags
+       ; whenSet (loadSplicesDir dflags)
+           (\_ -> loadSpliceFun e)
+           (do { h <- getHooked runMetaHook defaultRunMeta
+               ; res <- unwrap h e
+               ; whenSet (saveSplicesDir dflags)
+                   (\_ -> saveSpliceFun e res)
+                   (return ())
+               ; return res }) }
 
 defaultRunMeta :: MetaHook TcM
 defaultRunMeta (MetaE r)
@@ -694,29 +714,146 @@ defaultRunMeta (MetaAW r)
     -- the toAnnotationWrapper function that we slap around the user's code
 
 ----------------
+
+readHsSpliceData :: HscEnv -> FilePath -> IO HsSpliceData
+readHsSpliceData hsc_env hsSpliceFile = do
+  let ncu = NCU (updNameCache hsc_env)
+  exists <- doesFileExist hsSpliceFile
+  if exists
+    then do bh <- Bin.readBinMem hsSpliceFile
+            getWithUserData ncu bh
+    else pure emptyHsSpliceData
+
+writeHsSpliceData :: FilePath -> HsSpliceData -> TcM ()
+writeHsSpliceData hsSpliceFile hsSpliceData =
+  when (nonEmptyHsSpliceData hsSpliceData) $ do
+    dflags <- getDynFlags
+    liftIO $ do
+      bh <- Bin.openBinMem (100 * 1024)
+      --  ^^^ FIXME: how should we compute an approximation of size?
+      putWithUserData (debugTraceMsg dflags 3) bh hsSpliceData
+      Bin.writeBinMem bh hsSpliceFile
+
+-- | Update the splice data from the TcGblEnv using the given
+--   function. Used when -save-splices is passed, to record
+--   the splice results as we evaluate them and dump them
+--   to an .hs-splice file.
+modifyHsSpliceData :: (HsSpliceData -> HsSpliceData) -> TcM ()
+modifyHsSpliceData f = do
+  spliceDataRef <- tcg_hs_splice_data <$> getGblEnv
+  updTcRef spliceDataRef f
+
+-- | Record the result (second argument) of evaluating the expression splice
+--   represented by the first argument.
+addSpliceExprResult :: LHsExpr GhcTc -> LHsExpr GhcPs -> TcM ()
+addSpliceExprResult th@(L l _) resultE = do
+  serialExpr <- handleUnsupported (fmap ppr th) (Just $ ppr resultE)
+            =<< exprPS2SE resultE
+  modifyHsSpliceData $ recordSpliceResult l (SRExpr serialExpr)
+
+-- | Record the result (second argument) of evaluating the declaration splice
+--   represented by the first argument.
+addSpliceDeclsResult :: LHsExpr GhcTc -> [LHsDecl GhcPs] -> TcM ()
+addSpliceDeclsResult th@(L l _) resultDs = do
+  serialDecls <- traverse
+     (declPS2SE >=> handleUnsupported (fmap ppr th) (Just $ ppr resultDs))
+     resultDs
+  modifyHsSpliceData $ recordSpliceResult l (SRDecls serialDecls)
+
+-- | Record the result (second argument) of evaluating the pattern splice
+--   represented by the first argument.
+addSplicePatResult :: LHsExpr GhcTc -> LPat GhcPs -> TcM ()
+addSplicePatResult th@(L l _) resultE = do
+  serialPat <- handleUnsupported (fmap ppr th) (Just $ ppr resultE)
+            =<< patPS2SE resultE
+  modifyHsSpliceData $ recordSpliceResult l (SRPat serialPat)
+
+-- | Record the result (second argument) of evaluating the type splice
+--   represented by the first argument.
+addSpliceTypeResult :: LHsExpr GhcTc -> LHsType GhcPs -> TcM ()
+addSpliceTypeResult th@(L l _) resultE = do
+  serialTy <- handleUnsupported (fmap ppr th) (Just $ ppr resultE)
+          =<< tyPS2SE resultE
+  modifyHsSpliceData $ recordSpliceResult l (SRTy serialTy)
+
+-- | Look up the result of evaluating the splice represented by the first
+--   argument in an .hs-splice file, using the given function to extract
+--   the result in question (when found).
+getSpliceResult :: LHsExpr GhcTc -> (SpliceResult -> TcM a) -> TcM a
+getSpliceResult (L l _) f = do
+  gblEnv <- getGblEnv
+  hs_splice_data <- readTcRef (tcg_hs_splice_data gblEnv)
+  case lookupSpliceResult l hs_splice_data of
+    Nothing -> panic ("Could not find splice result for source span " ++ show l)
+    Just r  -> f r
+
+-- | Look up the result of evaluating an expression splice.
+getSpliceExprResult :: LHsExpr GhcTc -> TcM (LHsExpr GhcPs)
+getSpliceExprResult spliceE = getSpliceResult spliceE $ \res -> case res of
+    SRExpr e  -> exprSE2PS e >>= handleUnsupported (fmap ppr spliceE) Nothing
+    SRPat _   -> expectedFoundSplice "expression" "pattern"
+    SRTy _    -> expectedFoundSplice "expression" "type"
+    SRDecls _ -> expectedFoundSplice "expression" "declarations"
+
+-- | Look up the result of evaluating a pattern splice.
+getSplicePatResult :: LHsExpr GhcTc -> TcM (LPat GhcPs)
+getSplicePatResult spliceE = getSpliceResult spliceE $ \res -> case res of
+    SRPat e   -> patSE2PS e >>= handleUnsupported (fmap ppr spliceE) Nothing
+    SRExpr _  -> expectedFoundSplice "pattern" "expression"
+    SRTy _    -> expectedFoundSplice "pattern" "type"
+    SRDecls _ -> expectedFoundSplice "pattern" "declarations"
+
+-- | Look up the result of evaluating a type splice.
+getSpliceTypeResult :: LHsExpr GhcTc -> TcM (LHsType GhcPs)
+getSpliceTypeResult spliceE = getSpliceResult spliceE $ \res -> case res of
+    SRTy e    -> tySE2PS e >>= handleUnsupported (fmap ppr spliceE) Nothing
+    SRExpr _  -> expectedFoundSplice "type" "expression"
+    SRPat _   -> expectedFoundSplice "type" "pattern"
+    SRDecls _ -> expectedFoundSplice "type" "declarations"
+
+-- | Look up the result of evaluating a declaration splice.
+getSpliceDeclsResult :: LHsExpr GhcTc -> TcM [LHsDecl GhcPs]
+getSpliceDeclsResult spliceE = getSpliceResult spliceE $ \res -> case res of
+    SRExpr _   -> expectedFoundSplice "declarations" "expression"
+    SRPat _    -> expectedFoundSplice "declarations" "pattern"
+    SRTy _     -> expectedFoundSplice "delcarations" "type"
+    SRDecls ds -> traverse
+      (declSE2PS >=> handleUnsupported (fmap ppr spliceE) Nothing)
+      ds
+
+expectedFoundSplice :: String -> String -> a
+expectedFoundSplice exp found =
+  panic ("Expected a " ++ exp ++ " splice result but found: " ++ found)
+
 runMetaAW :: LHsExpr GhcTc         -- Of type AnnotationWrapper
           -> TcM Serialized
 runMetaAW = runMeta metaRequestAW
+  -- We cannot process annotations as they use the same
+  -- mechanism as TH. Instead, we ignore them when
+  -- doing a -save-splices pass, and we pretend we
+  -- read {-# ANN () #-} when doing a -load-splices pass.
+  (\_ -> pure $ toSerialized serializeWithData ())
+  (\_ _ -> pure ())
 
 runMetaE :: LHsExpr GhcTc          -- Of type (Q Exp)
          -> TcM (LHsExpr GhcPs)
-runMetaE = runMeta metaRequestE
+runMetaE = runMeta metaRequestE getSpliceExprResult addSpliceExprResult
 
 runMetaP :: LHsExpr GhcTc          -- Of type (Q Pat)
          -> TcM (LPat GhcPs)
-runMetaP = runMeta metaRequestP
+runMetaP = runMeta metaRequestP getSplicePatResult addSplicePatResult
 
 runMetaT :: LHsExpr GhcTc          -- Of type (Q Type)
          -> TcM (LHsType GhcPs)
-runMetaT = runMeta metaRequestT
+runMetaT = runMeta metaRequestT getSpliceTypeResult addSpliceTypeResult
 
 runMetaD :: LHsExpr GhcTc          -- Of type Q [Dec]
          -> TcM [LHsDecl GhcPs]
-runMetaD = runMeta metaRequestD
+runMetaD = runMeta metaRequestD getSpliceDeclsResult addSpliceDeclsResult
 
 ---------------
 runMeta' :: Bool                 -- Whether code should be printed in the exception message
-         -> (hs_syn -> SDoc)                                    -- how to print the code
+         -> (hs_syn -> SDoc)     -- how to print the code
          -> (SrcSpan -> ForeignHValue -> TcM (Either MsgDoc hs_syn))        -- How to run x
          -> LHsExpr GhcTc        -- Of type x; typically x = Q TH.Exp, or
                                  --    something like that
@@ -727,7 +864,7 @@ runMeta' show_code ppr_hs run_and_convert expr
                             -- we catch all kinds of splices and annotations.
 
         -- Check that we've had no errors of any sort so far.
-        -- For example, if we found an error in an earlier defn f, but
+        -- For example, if we fouénd an error in an earlier defn f, but
         -- recovered giving it type f :: forall a.a, it'd be very dodgy
         -- to carry ont.  Mind you, the staging restrictions mean we won't
         -- actually run f, but it still seems wrong. And, more concretely,

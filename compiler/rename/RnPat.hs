@@ -743,7 +743,7 @@ rnHsRecUpdFields flds
 getFieldIds :: [LHsRecField GhcRn arg] -> [Name]
 getFieldIds flds = map (unLoc . hsRecFieldSel . unLoc) flds
 
-getFieldLbls :: [LHsRecField id arg] -> [RdrName]
+getFieldLbls :: RdrOrSeName id ~ RdrName => [LHsRecField id arg] -> [RdrName]
 getFieldLbls flds
   = map (unLoc . rdrNameFieldOcc . unLoc . hsRecFieldLbl . unLoc) flds
 

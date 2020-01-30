@@ -4,7 +4,7 @@
                                       -- in module PlaceHolder
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE RoleAnnotations #-}
-{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeFamilies #-} -- needed to use OutputableBndrId
 
 module HsPat where
 import SrcLoc( Located )

@@ -10,7 +10,7 @@
                                       -- in module PlaceHolder
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE ExistentialQuantification #-}
-{-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE DeriveFunctor, DeriveFoldable, DeriveTraversable #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Abstract Haskell syntax for expressions.
@@ -442,11 +442,11 @@ data HsExpr p
   --             'ApiAnnotation.AnnClose'
 
   -- For details on above see note [Api annotations] in ApiAnnotation
-  | HsDo        (XDo p)                  -- Type of the whole expression
-                (HsStmtContext Name)     -- The parameterisation is unimportant
-                                         -- because in this context we never use
-                                         -- the PatGuard or ParStmt variant
-                (Located [ExprLStmt p]) -- "do":one or more stmts
+  | HsDo        (XDo p)                    -- Type of the whole expression
+                (HsStmtContext (DoName p)) -- The parameterisation is unimportant
+                                           -- because in this context we never use
+                                           -- the PatGuard or ParStmt variant
+                (Located [ExprLStmt p])    -- "do":one or more stmts
 
   -- | Syntactic list: [a,b,c,...]
   --
@@ -476,7 +476,6 @@ data HsExpr p
   --
   --  - 'ApiAnnotation.AnnKeywordId' : 'ApiAnnotation.AnnOpen' @'{'@,
   --         'ApiAnnotation.AnnDotdot','ApiAnnotation.AnnClose' @'}'@
-
   -- For details on above see note [Api annotations] in ApiAnnotation
   | RecordUpd
       { rupd_ext  :: XRecordUpd p
@@ -719,10 +718,12 @@ type instance XApp           (GhcPass _) = NoExt
 type instance XAppTypeE      GhcPs = LHsWcType GhcPs
 type instance XAppTypeE      GhcRn = LHsWcType GhcRn
 type instance XAppTypeE      GhcTc = LHsWcType GhcRn
+type instance XAppTypeE      GhcSe = LHsWcType GhcSe
 
 type instance XOpApp         GhcPs = NoExt
 type instance XOpApp         GhcRn = Fixity
 type instance XOpApp         GhcTc = Fixity
+type instance XOpApp         GhcSe = NoExt
 
 type instance XNegApp        (GhcPass _) = NoExt
 type instance XPar           (GhcPass _) = NoExt
@@ -733,6 +734,7 @@ type instance XExplicitTuple (GhcPass _) = NoExt
 type instance XExplicitSum   GhcPs = NoExt
 type instance XExplicitSum   GhcRn = NoExt
 type instance XExplicitSum   GhcTc = [Type]
+type instance XExplicitSum   GhcSe = NoExt
 
 type instance XCase          (GhcPass _) = NoExt
 type instance XIf            (GhcPass _) = NoExt
@@ -740,32 +742,39 @@ type instance XIf            (GhcPass _) = NoExt
 type instance XMultiIf       GhcPs = NoExt
 type instance XMultiIf       GhcRn = NoExt
 type instance XMultiIf       GhcTc = Type
+type instance XMultiIf       GhcSe = NoExt
 
 type instance XLet           (GhcPass _) = NoExt
 
 type instance XDo            GhcPs = NoExt
 type instance XDo            GhcRn = NoExt
 type instance XDo            GhcTc = Type
+type instance XDo            GhcSe = NoExt
 
 type instance XExplicitList  GhcPs = NoExt
 type instance XExplicitList  GhcRn = NoExt
 type instance XExplicitList  GhcTc = Type
+type instance XExplicitList  GhcSe = NoExt
 
 type instance XRecordCon     GhcPs = NoExt
 type instance XRecordCon     GhcRn = NoExt
 type instance XRecordCon     GhcTc = RecordConTc
+type instance XRecordCon     GhcSe = NoExt
 
 type instance XRecordUpd     GhcPs = NoExt
 type instance XRecordUpd     GhcRn = NoExt
 type instance XRecordUpd     GhcTc = RecordUpdTc
+type instance XRecordUpd     GhcSe = NoExt
 
 type instance XExprWithTySig GhcPs = (LHsSigWcType GhcPs)
 type instance XExprWithTySig GhcRn = (LHsSigWcType GhcRn)
 type instance XExprWithTySig GhcTc = (LHsSigWcType GhcRn)
+type instance XExprWithTySig GhcSe = (LHsSigWcType GhcSe)
 
 type instance XArithSeq      GhcPs = NoExt
 type instance XArithSeq      GhcRn = NoExt
 type instance XArithSeq      GhcTc = PostTcExpr
+type instance XArithSeq      GhcSe = NoExt
 
 type instance XSCC           (GhcPass _) = NoExt
 type instance XCoreAnn       (GhcPass _) = NoExt
@@ -780,10 +789,12 @@ type instance XProc          (GhcPass _) = NoExt
 type instance XStatic        GhcPs = NoExt
 type instance XStatic        GhcRn = NameSet
 type instance XStatic        GhcTc = NameSet
+type instance XStatic        GhcSe = NoExt
 
 type instance XArrApp        GhcPs = NoExt
 type instance XArrApp        GhcRn = NoExt
 type instance XArrApp        GhcTc = Type
+type instance XArrApp        GhcSe = NoExt
 
 type instance XArrForm       (GhcPass _) = NoExt
 type instance XTick          (GhcPass _) = NoExt
@@ -820,6 +831,7 @@ type instance XPresent         (GhcPass _) = NoExt
 type instance XMissing         GhcPs = NoExt
 type instance XMissing         GhcRn = NoExt
 type instance XMissing         GhcTc = Type
+type instance XMissing         GhcSe = NoExt
 
 type instance XXTupArg         (GhcPass _) = NoExt
 
@@ -1393,6 +1405,7 @@ data HsCmd id
 type instance XCmdArrApp  GhcPs = NoExt
 type instance XCmdArrApp  GhcRn = NoExt
 type instance XCmdArrApp  GhcTc = Type
+type instance XCmdArrApp  GhcSe = NoExt
 
 type instance XCmdArrForm (GhcPass _) = NoExt
 type instance XCmdApp     (GhcPass _) = NoExt
@@ -1405,6 +1418,7 @@ type instance XCmdLet     (GhcPass _) = NoExt
 type instance XCmdDo      GhcPs = NoExt
 type instance XCmdDo      GhcRn = NoExt
 type instance XCmdDo      GhcTc = Type
+type instance XCmdDo      GhcSe = NoExt
 
 type instance XCmdWrap    (GhcPass _) = NoExt
 type instance XXCmd       (GhcPass _) = NoExt
@@ -1436,6 +1450,7 @@ data CmdTopTc
 type instance XCmdTop  GhcPs = NoExt
 type instance XCmdTop  GhcRn = CmdSyntaxTable GhcRn -- See Note [CmdSyntaxTable]
 type instance XCmdTop  GhcTc = CmdTopTc
+type instance XCmdTop  GhcSe = NoExt
 
 type instance XXCmdTop (GhcPass _) = NoExt
 
@@ -1586,6 +1601,7 @@ data MatchGroupTc
 type instance XMG         GhcPs b = NoExt
 type instance XMG         GhcRn b = NoExt
 type instance XMG         GhcTc b = MatchGroupTc
+type instance XMG         GhcSe b = NoExt
 
 type instance XXMatchGroup (GhcPass _) b = NoExt
 
@@ -1985,28 +2001,34 @@ type instance XLastStmt        (GhcPass _) (GhcPass _) b = NoExt
 type instance XBindStmt        (GhcPass _) GhcPs b = NoExt
 type instance XBindStmt        (GhcPass _) GhcRn b = NoExt
 type instance XBindStmt        (GhcPass _) GhcTc b = Type
+type instance XBindStmt        (GhcPass _) GhcSe b = NoExt
 
 type instance XApplicativeStmt (GhcPass _) GhcPs b = NoExt
 type instance XApplicativeStmt (GhcPass _) GhcRn b = NoExt
 type instance XApplicativeStmt (GhcPass _) GhcTc b = Type
+type instance XApplicativeStmt (GhcPass _) GhcSe b = NoExt
 
 type instance XBodyStmt        (GhcPass _) GhcPs b = NoExt
 type instance XBodyStmt        (GhcPass _) GhcRn b = NoExt
 type instance XBodyStmt        (GhcPass _) GhcTc b = Type
+type instance XBodyStmt        (GhcPass _) GhcSe b = NoExt
 
 type instance XLetStmt         (GhcPass _) (GhcPass _) b = NoExt
 
 type instance XParStmt         (GhcPass _) GhcPs b = NoExt
 type instance XParStmt         (GhcPass _) GhcRn b = NoExt
 type instance XParStmt         (GhcPass _) GhcTc b = Type
+type instance XParStmt         (GhcPass _) GhcSe b = NoExt
 
 type instance XTransStmt       (GhcPass _) GhcPs b = NoExt
 type instance XTransStmt       (GhcPass _) GhcRn b = NoExt
 type instance XTransStmt       (GhcPass _) GhcTc b = Type
+type instance XTransStmt       (GhcPass _) GhcSe b = NoExt
 
 type instance XRecStmt         (GhcPass _) GhcPs b = NoExt
 type instance XRecStmt         (GhcPass _) GhcRn b = NoExt
 type instance XRecStmt         (GhcPass _) GhcTc b = RecStmtTc
+type instance XRecStmt         (GhcPass _) GhcSe b = NoExt
 
 type instance XXStmtLR         (GhcPass _) (GhcPass _) b = NoExt
 
@@ -2705,7 +2727,7 @@ data HsMatchContext id -- Not an extensible tag
   | ThPatSplice            -- ^A Template Haskell pattern splice
   | ThPatQuote             -- ^A Template Haskell pattern quotation [p| (a,b) |]
   | PatSyn                 -- ^A pattern synonym declaration
-  deriving Functor
+  deriving (Functor, Foldable, Traversable)
 deriving instance (Data id) => Data (HsMatchContext id)
 
 instance OutputableBndr id => Outputable (HsMatchContext id) where
@@ -2721,6 +2743,7 @@ instance OutputableBndr id => Outputable (HsMatchContext id) where
   ppr ThPatSplice           = text "ThPatSplice"
   ppr ThPatQuote            = text "ThPatQuote"
   ppr PatSyn                = text "PatSyn"
+
 
 isPatSynCtxt :: HsMatchContext id -> Bool
 isPatSynCtxt ctxt =
@@ -2742,7 +2765,7 @@ data HsStmtContext id
   | PatGuard (HsMatchContext id)     -- ^Pattern guard for specified thing
   | ParStmtCtxt (HsStmtContext id)   -- ^A branch of a parallel stmt
   | TransStmtCtxt (HsStmtContext id) -- ^A branch of a transform stmt
-  deriving Functor
+  deriving (Functor, Foldable, Traversable)
 deriving instance (Data id) => Data (HsStmtContext id)
 
 isListCompExpr :: HsStmtContext id -> Bool

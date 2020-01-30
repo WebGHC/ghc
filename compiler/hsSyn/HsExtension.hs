@@ -23,9 +23,14 @@ import Data.Data hiding ( Fixity )
 import PlaceHolder
 import Name
 import RdrName
+import SeName
 import Var
+import IfaceType  ( IfaceType )
 import Outputable
 import SrcLoc (Located)
+
+import Data.Kind
+import qualified Type
 
 {-
 Note [Trees that grow]
@@ -68,20 +73,22 @@ data GhcPass (c :: Pass)
 deriving instance Eq (GhcPass c)
 deriving instance Typeable c => Data (GhcPass c)
 
-data Pass = Parsed | Renamed | Typechecked
+data Pass = Parsed | Renamed | Typechecked | Serialisable
          deriving (Data)
 
 -- Type synonyms as a shorthand for tagging
-type GhcPs   = GhcPass 'Parsed      -- Old 'RdrName' type param
-type GhcRn   = GhcPass 'Renamed     -- Old 'Name' type param
-type GhcTc   = GhcPass 'Typechecked -- Old 'Id' type para,
-type GhcTcId = GhcTc                -- Old 'TcId' type param
+type GhcPs   = GhcPass 'Parsed       -- Old 'RdrName' type param
+type GhcRn   = GhcPass 'Renamed      -- Old 'Name' type param
+type GhcTc   = GhcPass 'Typechecked  -- Old 'Id' type para,
+type GhcSe   = GhcPass 'Serialisable -- New pass, with serialisable AST representations
+type GhcTcId = GhcTc                 -- Old 'TcId' type param
 
 -- | Maps the "normal" id type for a given pass
 type family IdP p
 type instance IdP GhcPs = RdrName
 type instance IdP GhcRn = Name
 type instance IdP GhcTc = Id
+type instance IdP GhcSe = SeName
 
 type LIdP p = Located (IdP p)
 
@@ -1105,4 +1112,34 @@ type OutputableBndrId id =
   ( OutputableBndr (NameOrRdrName (IdP id))
   , OutputableBndr (IdP id)
   , OutputableX id
+  , OutputableBndr (RdrOrSeName id)
+  , OutputableBndr (IdSigId id)
+  , VarType (IdSigId id)
   )
+
+class VarType a where
+  getVarType :: a -> Maybe Type.Type
+
+instance VarType Var where
+  getVarType = Just . varType
+
+instance VarType SeName where
+  getVarType _ = Nothing
+
+type family IdSigId pass where
+  IdSigId GhcSe       = SeName
+  IdSigId (GhcPass _) = Id
+
+type family LitType x where
+  LitType (GhcPass 'Serialisable) = IfaceType
+  LitType                       a = Type.Type
+
+type family DoName pass where
+  DoName GhcSe = SeName
+  DoName (GhcPass _) = Name
+
+type family RdrOrSeName pass
+type instance RdrOrSeName GhcSe = SeName
+type instance RdrOrSeName GhcRn = RdrName
+type instance RdrOrSeName GhcTc = RdrName
+type instance RdrOrSeName GhcPs = RdrName

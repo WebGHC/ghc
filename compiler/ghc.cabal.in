@@ -210,6 +210,7 @@ Library
         NameSet
         OccName
         RdrName
+        SeName
         NameCache
         SrcLoc
         UniqSupply
@@ -318,6 +319,11 @@ Library
         HsDecls
         HsDoc
         HsExpr
+        HsExprBin
+        HsExprBin_ConversionPS2SE
+        HsExprBin_ConversionSE2PS
+        HsExprBin_Conversions
+        HsExprBin_Instances
         HsImpExp
         HsLit
         PlaceHolder

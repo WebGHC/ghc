@@ -12,6 +12,7 @@ Datatype for: @BindGroup@, @Bind@, @Sig@, @Bind@.
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE UndecidableInstances #-} -- Note [Pass sensitive types]
                                       -- in module PlaceHolder
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE TypeFamilies #-}
@@ -322,10 +323,12 @@ data NPatBindTc = NPatBindTc {
 type instance XFunBind    (GhcPass pL) GhcPs = NoExt
 type instance XFunBind    (GhcPass pL) GhcRn = NameSet -- Free variables
 type instance XFunBind    (GhcPass pL) GhcTc = NameSet -- Free variables
+type instance XFunBind    (GhcPass pL) GhcSe = NoExt
 
 type instance XPatBind    GhcPs (GhcPass pR) = NoExt
 type instance XPatBind    GhcRn (GhcPass pR) = NameSet -- Free variables
 type instance XPatBind    GhcTc (GhcPass pR) = NPatBindTc
+type instance XPatBind    GhcSe (GhcPass pR) = NoExt
 
 type instance XVarBind    (GhcPass pL) (GhcPass pR) = NoExt
 type instance XAbsBinds   (GhcPass pL) (GhcPass pR) = NoExt
@@ -382,6 +385,7 @@ data PatSynBind idL idR
 type instance XPSB         (GhcPass idL) GhcPs = NoExt
 type instance XPSB         (GhcPass idL) GhcRn = NameSet
 type instance XPSB         (GhcPass idL) GhcTc = NameSet
+type instance XPSB         (GhcPass idL) GhcSe = NoExt
 
 type instance XXPatSynBind (GhcPass idL) (GhcPass idR) = NoExt
 
@@ -828,6 +832,7 @@ type instance XIPBinds       GhcPs = NoExt
 type instance XIPBinds       GhcRn = NoExt
 type instance XIPBinds       GhcTc = TcEvBinds -- binds uses of the
                                                -- implicit parameters
+type instance XIPBinds       GhcSe = NoExt
 
 
 type instance XXHsIPBinds    (GhcPass p) = NoExt
@@ -948,7 +953,7 @@ data Sig pass
         -- the desired Id itself, replete with its name, type
         -- and IdDetails.  Otherwise it's just like a type
         -- signature: there should be an accompanying binding
-  | IdSig (XIdSig pass) Id
+  | IdSig (XIdSig pass) (IdSigId pass)
 
         -- | An ordinary fixity declaration
         --
@@ -1177,7 +1182,9 @@ ppr_sig (TypeSig _ vars ty)  = pprVarSig (map unLoc vars) (ppr ty)
 ppr_sig (ClassOpSig _ is_deflt vars ty)
   | is_deflt                 = text "default" <+> pprVarSig (map unLoc vars) (ppr ty)
   | otherwise                = pprVarSig (map unLoc vars) (ppr ty)
-ppr_sig (IdSig _ id)         = pprVarSig [id] (ppr (varType id))
+ppr_sig (IdSig _ id)         = case getVarType id of
+  Nothing -> ppr id
+  Just t  -> pprVarSig [id] (ppr t)
 ppr_sig (FixSig _ fix_sig)   = ppr fix_sig
 ppr_sig (SpecSig _ var ty inl@(InlinePragma { inl_inline = spec }))
   = pragSrcBrackets (inl_src inl) pragmaSrc (pprSpec (unLoc var)

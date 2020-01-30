@@ -32,6 +32,7 @@ import Outputable
 import Unique
 import Util
 import BasicTypes
+import Binary
 import Var
 import FieldLabel
 
@@ -327,6 +328,10 @@ instance Data.Data PatSyn where
     toConstr _   = abstractConstr "PatSyn"
     gunfold _ _  = error "gunfold"
     dataTypeOf _ = mkNoRepType "PatSyn"
+
+instance Binary PatSyn where
+  put = error "Binary PatSyn: not implemented yet"
+  get = error "Binary PatSyn: not implemented yet"
 
 {-
 ************************************************************************

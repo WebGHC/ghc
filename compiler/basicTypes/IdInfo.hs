@@ -18,7 +18,7 @@ module IdInfo (
         RecSelParent(..),
 
         -- * The IdInfo type
-        IdInfo,         -- Abstract
+        IdInfo,
         vanillaIdInfo, noCafIdInfo,
 
         -- ** The OneShotInfo type

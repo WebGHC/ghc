@@ -5,7 +5,7 @@
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE RoleAnnotations #-}
 {-# LANGUAGE ExistentialQuantification #-}
-{-# LANGUAGE TypeFamilies #-}
+{-# LANGUAGE TypeFamilies #-} -- needed to use OutputableBndrId
 
 module HsExpr where
 

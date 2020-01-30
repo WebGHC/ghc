@@ -10,6 +10,7 @@
 {-# LANGUAGE UndecidableInstances #-} -- Note [Pass sensitive types]
                                       -- in module PlaceHolder
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE TypeFamilies #-}
 
 -- | Abstract syntax of global declarations.
@@ -577,14 +578,17 @@ type instance XFamDecl      (GhcPass _) = NoExt
 type instance XSynDecl      GhcPs = NoExt
 type instance XSynDecl      GhcRn = NameSet -- FVs
 type instance XSynDecl      GhcTc = NameSet -- FVs
+type instance XSynDecl      GhcSe = NoExt
 
 type instance XDataDecl     GhcPs = NoExt
 type instance XDataDecl     GhcRn = DataDeclRn
 type instance XDataDecl     GhcTc = DataDeclRn
+type instance XDataDecl     GhcSe = NoExt
 
 type instance XClassDecl    GhcPs = NoExt
 type instance XClassDecl    GhcRn = NameSet -- FVs
 type instance XClassDecl    GhcTc = NameSet -- FVs
+type instance XClassDecl    GhcSe = NoExt
 
 type instance XXTyClDecl    (GhcPass _) = NoExt
 
@@ -695,7 +699,6 @@ hsDeclHasCusk (XTyClDecl _) = panic "hsDeclHasCusk"
 -- ~~~~~~~~~~~~~~~~~~~~~~~~
 
 instance (p ~ GhcPass pass, OutputableBndrId p) => Outputable (TyClDecl p) where
-
     ppr (FamDecl { tcdFam = decl }) = ppr decl
     ppr (SynDecl { tcdLName = ltycon, tcdTyVars = tyvars, tcdFixity = fixity
                  , tcdRhs = rhs })
@@ -1868,6 +1871,7 @@ data DerivStrategy pass
 type instance XViaStrategy GhcPs = LHsSigType GhcPs
 type instance XViaStrategy GhcRn = LHsSigType GhcRn
 type instance XViaStrategy GhcTc = Type
+type instance XViaStrategy GhcSe = LHsSigType GhcSe
 
 instance (p ~ GhcPass pass, OutputableBndrId p)
         => Outputable (DerivStrategy p) where
@@ -1968,10 +1972,12 @@ data ForeignDecl pass
 type instance XForeignImport   GhcPs = NoExt
 type instance XForeignImport   GhcRn = NoExt
 type instance XForeignImport   GhcTc = Coercion
+type instance XForeignImport   GhcSe = NoExt
 
 type instance XForeignExport   GhcPs = NoExt
 type instance XForeignExport   GhcRn = NoExt
 type instance XForeignExport   GhcTc = Coercion
+type instance XForeignExport   GhcSe = NoExt
 
 type instance XXForeignDecl    (GhcPass _) = NoExt
 
@@ -2114,6 +2120,7 @@ data HsRuleRn = HsRuleRn NameSet NameSet -- Free-vars from the LHS and RHS
 type instance XHsRule       GhcPs = NoExt
 type instance XHsRule       GhcRn = HsRuleRn
 type instance XHsRule       GhcTc = HsRuleRn
+type instance XHsRule       GhcSe = NoExt
 
 type instance XXRuleDecl    (GhcPass _) = NoExt
 

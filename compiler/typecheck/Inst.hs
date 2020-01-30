@@ -7,7 +7,7 @@ The @Inst@ type: dictionaries or method instances
 -}
 
 {-# LANGUAGE CPP, MultiWayIf, TupleSections #-}
-{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleContexts, TypeFamilies #-}
 
 module Inst (
        deeplySkolemise,

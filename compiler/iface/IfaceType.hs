@@ -139,7 +139,7 @@ type IfaceContext = [IfacePredType]
 data IfaceTyLit
   = IfaceNumTyLit Integer
   | IfaceStrTyLit FastString
-  deriving (Eq)
+  deriving Eq
 
 type IfaceTyConBinder = TyVarBndr IfaceTvBndr TyConBndrVis
 type IfaceForAllBndr  = TyVarBndr IfaceTvBndr ArgFlag
@@ -170,7 +170,7 @@ instance Monoid IfaceTcArgs where
 -- properly.
 data IfaceTyCon = IfaceTyCon { ifaceTyConName :: IfExtName
                              , ifaceTyConInfo :: IfaceTyConInfo }
-    deriving (Eq)
+    deriving Eq
 
 -- | Is a TyCon a promoted data constructor or just a normal type constructor?
 data IsPromoted = IsNotPromoted | IsPromoted
@@ -194,7 +194,7 @@ data IfaceTyConSort = IfaceNormalTyCon          -- ^ a regular tycon
                       -- that is actually being applied to two types
                       -- of the same kind.  This affects pretty-printing
                       -- only: see Note [Equality predicates in IfaceType]
-                    deriving (Eq)
+                    deriving Eq
 
 {- Note [Free tyvars in IfaceType]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -278,7 +278,7 @@ data IfaceTyConInfo   -- Used to guide pretty-printing
                       -- and to disambiguate D from 'D (they share a name)
   = IfaceTyConInfo { ifaceTyConIsPromoted :: IsPromoted
                    , ifaceTyConSort       :: IfaceTyConSort }
-    deriving (Eq)
+    deriving Eq
 
 data IfaceCoercion
   = IfaceReflCo       Role IfaceType
@@ -1650,6 +1650,7 @@ instance Binary IfaceUnivCoProv where
            _ -> panic ("get IfaceUnivCoProv " ++ show tag)
 
 
+{-
 instance Binary (DefMethSpec IfaceType) where
     put_ bh VanillaDM     = putByte bh 0
     put_ bh (GenericDM t) = putByte bh 1 >> put_ bh t
@@ -1658,3 +1659,4 @@ instance Binary (DefMethSpec IfaceType) where
             case h of
               0 -> return VanillaDM
               _ -> do { t <- get bh; return (GenericDM t) }
+-}

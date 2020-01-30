@@ -10,6 +10,8 @@ import TcRnTypes( TcM , SpliceType )
 import TcType   ( ExpRhoType )
 import Annotations ( Annotation, CoreAnnTarget )
 import HsExtension ( GhcTcId, GhcRn, GhcPs )
+import HscTypes    ( HscEnv )
+import HsExprBin   ( HsSpliceData )
 
 import HsSyn      ( HsSplice, HsBracket, HsExpr, LHsExpr, LHsType, LPat,
                     LHsDecl, ThModFinalizers )
@@ -42,3 +44,6 @@ lookupThName_maybe :: TH.Name -> TcM (Maybe Name)
 runQuasi :: TH.Q a -> TcM a
 runRemoteModFinalizers :: ThModFinalizers -> TcM ()
 finishTH :: TcM ()
+
+readHsSpliceData :: HscEnv -> FilePath -> IO HsSpliceData
+writeHsSpliceData :: FilePath -> HsSpliceData -> TcM ()

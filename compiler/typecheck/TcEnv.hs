@@ -1,6 +1,6 @@
 -- (c) The University of Glasgow 2006
 {-# LANGUAGE CPP, FlexibleInstances #-}
-{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleContexts, GADTs #-}
 {-# OPTIONS_GHC -fno-warn-orphans #-}  -- instance MonadThings is necessarily an
                                        -- orphan
 {-# LANGUAGE UndecidableInstances #-} -- Note [Pass sensitive types]

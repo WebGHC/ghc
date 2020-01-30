@@ -47,7 +47,7 @@ module TcRnDriver (
 
 import GhcPrelude
 
-import {-# SOURCE #-} TcSplice ( finishTH )
+import {-# SOURCE #-} TcSplice( finishTH, writeHsSpliceData )
 import RnSplice ( rnTopSpliceDecls, traceSplice, SpliceInfo(..) )
 import IfaceEnv( externaliseName )
 import TcHsType
@@ -114,6 +114,7 @@ import Avail
 import TyCon
 import SrcLoc
 import HscTypes
+import HsExprBin
 import ListSetOps
 import Outputable
 import ConLike
@@ -137,6 +138,8 @@ import qualified Data.Set as S
 
 import Control.DeepSeq
 import Control.Monad
+import System.Directory
+import System.FilePath (takeDirectory)
 
 #include "HsVersions.h"
 
@@ -421,6 +424,17 @@ tcRnSrcDecls explicit_mod_hdr decls
         -- Finalizers must run after constraints are simplified, or some types
         -- might not be complete when using reify (see #12777).
       ; (tcg_env, tcl_env) <- setGblEnv tcg_env run_th_modfinalizers
+
+      ; dynflags <- getDynFlags
+      ; whenSet (saveSplicesDir dynflags)
+          (\splicesDir -> do
+              moduleSplicesPath <- getModuleSplicesPath splicesDir <$> getModule
+              hs_splice_data <- readTcRef (tcg_hs_splice_data tcg_env)
+              liftIO $ createDirectoryIfMissing True (takeDirectory moduleSplicesPath)
+              writeHsSpliceData moduleSplicesPath hs_splice_data
+          )
+          (pure ())
+
       ; setEnvs (tcg_env, tcl_env) $ do {
 
       ; finishTH

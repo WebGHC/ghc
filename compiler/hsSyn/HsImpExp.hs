@@ -12,6 +12,7 @@ HsImpExp: Abstract syntax: imports, exports, interfaces
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-} -- Note [Pass sensitive types]
                                       -- in module PlaceHolder
+{-# LANGUAGE TypeFamilies #-}
 
 module HsImpExp where
 

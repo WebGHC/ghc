@@ -16,7 +16,7 @@ module IfaceEnv (
         ifaceExportNames,
 
         -- Name-cache stuff
-        allocateGlobalBinder, updNameCacheTc,
+        allocateGlobalBinder, updNameCacheTc, updNameCacheIO,
         mkNameCacheUpdater, NameCacheUpdater(..),
    ) where
 

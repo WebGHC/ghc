@@ -39,9 +39,9 @@ import Name
 import Unique
 import Var
 import Util
-import Binary
 import Pair
 import BasicTypes
+import Binary
 import Data.Typeable ( Typeable )
 import SrcLoc
 import qualified Data.Data as Data
@@ -440,15 +440,16 @@ instance Outputable Role where
   ppr = ftext . fsFromRole
 
 instance Binary Role where
-  put_ bh Nominal          = putByte bh 1
-  put_ bh Representational = putByte bh 2
-  put_ bh Phantom          = putByte bh 3
-
-  get bh = do tag <- getByte bh
-              case tag of 1 -> return Nominal
-                          2 -> return Representational
-                          3 -> return Phantom
-                          _ -> panic ("get Role " ++ show tag)
+  put_ bh r = putByte bh $ case r of
+    Nominal          -> 0
+    Representational -> 1
+    Phantom          -> 2
+  get bh = do
+    tag <- getByte bh
+    pure $ case tag of
+      0 -> Nominal
+      1 -> Representational
+      _ -> Phantom
 
 {-
 ************************************************************************
@@ -500,7 +501,6 @@ instance Ord CoAxiomRule where
 
 instance Outputable CoAxiomRule where
   ppr = ppr . coaxrName
-
 
 -- Type checking of built-in families
 data BuiltInSynFamily = BuiltInSynFamily

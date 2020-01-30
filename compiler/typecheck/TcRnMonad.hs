@@ -145,6 +145,7 @@ import IOEnv            -- Re-export all
 import TcEvidence
 
 import HsSyn hiding (LIE)
+import HsExprBin
 import HscTypes
 import Module
 import RdrName
@@ -182,7 +183,7 @@ import Control.Monad
 import Data.Set ( Set )
 import qualified Data.Set as Set
 
-import {-# SOURCE #-} TcSplice ( runRemoteModFinalizers )
+import {-# SOURCE #-} TcSplice ( readHsSpliceData, runRemoteModFinalizers )
 import {-# SOURCE #-} TcEnv    ( tcInitTidyEnv )
 
 import qualified Data.Map as Map
@@ -228,9 +229,16 @@ initTc hsc_env hsc_src keep_rn_syntax mod loc do_this
         th_coreplugins_var <- newIORef [] ;
         th_state_var         <- newIORef Map.empty ;
         th_remote_state_var  <- newIORef Nothing ;
+        dflags <- pure (hsc_dflags hsc_env) ;
+        hs_splice_data <- newIORef =<< whenSet (loadSplicesDir dflags)
+          (\splicesDir -> do
+              if moduleUnitId mod == interactiveUnitId
+                then return emptyHsSpliceData
+                else do let moduleSplicesPath = getModuleSplicesPath splicesDir mod
+                        readHsSpliceData hsc_env moduleSplicesPath
+          )
+          (pure emptyHsSpliceData) ;
         let {
-             dflags = hsc_dflags hsc_env ;
-
              maybe_rn_syntax :: forall a. a -> Maybe a ;
              maybe_rn_syntax empty_val
                 | dopt Opt_D_dump_rn_ast dflags = Just empty_val
@@ -310,7 +318,8 @@ initTc hsc_env hsc_src keep_rn_syntax mod loc do_this
                 tcg_top_loc        = loc,
                 tcg_static_wc      = static_wc_var,
                 tcg_complete_matches = [],
-                tcg_cc_st          = cc_st_var
+                tcg_cc_st          = cc_st_var,
+                tcg_hs_splice_data = hs_splice_data
              } ;
         } ;
 

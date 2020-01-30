@@ -916,6 +916,8 @@ data DynFlags = DynFlags {
   hiDir                 :: Maybe String,
   stubDir               :: Maybe String,
   dumpDir               :: Maybe String,
+  saveSplicesDir        :: Maybe String,
+  loadSplicesDir        :: Maybe String,
 
   objectSuf             :: String,
   hcSuf                 :: String,
@@ -1797,6 +1799,8 @@ defaultDynFlags mySettings (myLlvmTargets, myLlvmPasses) =
         hiDir                   = Nothing,
         stubDir                 = Nothing,
         dumpDir                 = Nothing,
+        saveSplicesDir          = Nothing,
+        loadSplicesDir          = Nothing,
 
         objectSuf               = phaseInputExt StopLn,
         hcSuf                   = phaseInputExt HCc,
@@ -2371,6 +2375,7 @@ getVerbFlags dflags
   | otherwise             = []
 
 setObjectDir, setHiDir, setStubDir, setDumpDir, setOutputDir,
+         setSaveSplicesDir, setLoadSplicesDir,
          setDynObjectSuf, setDynHiSuf,
          setDylibInstallName,
          setObjectSuf, setHiSuf, setHcSuf, parseDynLibLoaderMode,
@@ -2390,6 +2395,8 @@ setStubDir    f d = d { stubDir    = Just f
   -- builds).
 setDumpDir    f d = d { dumpDir    = Just f}
 setOutputDir  f = setObjectDir f . setHiDir f . setStubDir f . setDumpDir f
+setSaveSplicesDir f d = d { saveSplicesDir = Just f}
+setLoadSplicesDir f d = d { loadSplicesDir = Just f}
 setDylibInstallName  f d = d { dylibInstallName = Just f}
 
 setObjectSuf    f d = d { objectSuf    = f}
@@ -2948,6 +2955,8 @@ dynamic_flags_deps = [
   , make_ord_flag defGhcFlag "tmpdir"            (hasArg setTmpDir)
   , make_ord_flag defGhcFlag "stubdir"           (hasArg setStubDir)
   , make_ord_flag defGhcFlag "dumpdir"           (hasArg setDumpDir)
+  , make_ord_flag defGhcFlag "save-splices"      (hasArg setSaveSplicesDir)
+  , make_ord_flag defGhcFlag "load-splices"      (hasArg setLoadSplicesDir)
   , make_ord_flag defGhcFlag "outputdir"         (hasArg setOutputDir)
   , make_ord_flag defGhcFlag "ddump-file-prefix"
         (hasArg (setDumpPrefixForce . Just))
@@ -4083,16 +4092,7 @@ supportedLanguageOverlays = map (flagSpecName . snd) safeHaskellFlagsDeps
 supportedExtensions :: [String]
 supportedExtensions = concatMap toFlagSpecNamePair xFlags
   where
-    toFlagSpecNamePair flg
-#if !defined(GHCI)
-      -- IMPORTANT! Make sure that `ghc --supported-extensions` omits
-      -- "TemplateHaskell"/"QuasiQuotes" when it's known not to work out of the
-      -- box. See also GHC #11102 and #16331 for more details about
-      -- the rationale
-      | flagSpecFlag flg == LangExt.TemplateHaskell  = [noName]
-      | flagSpecFlag flg == LangExt.QuasiQuotes      = [noName]
-#endif
-      | otherwise = [name, noName]
+    toFlagSpecNamePair flg = [name, noName]
       where
         noName = "No" ++ name
         name = flagSpecName flg

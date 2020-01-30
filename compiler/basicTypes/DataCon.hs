@@ -811,6 +811,7 @@ instance Binary SrcUnpackedness where
            1 -> return SrcUnpack
            _ -> return NoSrcUnpack
 
+
 -- | Compare strictness annotations
 eqHsBang :: HsImplBang -> HsImplBang -> Bool
 eqHsBang HsLazy               HsLazy              = True

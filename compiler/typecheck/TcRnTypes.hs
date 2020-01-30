@@ -160,6 +160,7 @@ import TyCoRep  ( CoercionHole(..), coHoleCoVar )
 import Coercion ( Coercion, mkHoleCo )
 import ConLike  ( ConLike(..) )
 import DataCon  ( DataCon, dataConUserType, dataConOrigArgTys )
+import {-# SOURCE #-} HsExprBin
 import PatSyn   ( PatSyn, pprPatSynType )
 import Id       ( idType, idName )
 import FieldLabel ( FieldLabel )
@@ -689,7 +690,19 @@ data TcGblEnv
         tcg_complete_matches :: [CompleteMatch],
 
         -- ^ Tracking indices for cost centre annotations
-        tcg_cc_st   :: TcRef CostCentreState
+        tcg_cc_st   :: TcRef CostCentreState,
+        -- ^ Splice evaluation results
+        --
+        -- When @-save-splices@ is passed, we will
+        -- record splice results in this field and write
+        -- them all to an .hs-splice file when we are done
+        -- processing the module.
+        --
+        -- When @-load-splices@ is passed, we will read
+        -- the .hs-splice file before we start processing a
+        -- module (when it exists) and store all its contents
+        -- in this field.
+        tcg_hs_splice_data :: TcRef HsSpliceData
     }
 
 -- NB: topModIdentity, not topModSemantic!

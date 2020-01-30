@@ -584,7 +584,6 @@ instance Binary TyConBndrVis where
                   0 -> return AnonTCB
                   _ -> do { vis <- get bh; return (NamedTCB vis) } }
 
-
 {- *********************************************************************
 *                                                                      *
                The TyCon type

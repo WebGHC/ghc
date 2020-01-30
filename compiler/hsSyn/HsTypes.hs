@@ -9,6 +9,7 @@ HsTypes: Abstract syntax: user-defined types
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE UndecidableInstances #-} -- Note [Pass sensitive types]
                                       -- in module PlaceHolder
@@ -38,7 +39,7 @@ module HsTypes (
 
         HsConDetails(..),
 
-        FieldOcc(..), LFieldOcc, mkFieldOcc,
+        FieldOcc(..), LFieldOcc, mkFieldOcc, fieldOccRdrName,
         AmbiguousFieldOcc(..), mkAmbiguousFieldOcc,
         rdrNameAmbiguousFieldOcc, selectorAmbiguousFieldOcc,
         unambiguousFieldOcc, ambiguousFieldOcc,
@@ -85,6 +86,7 @@ import TysPrim( funTyConName )
 import Type
 import HsDoc
 import BasicTypes
+import Binary
 import SrcLoc
 import Outputable
 import FastString
@@ -277,6 +279,7 @@ data HsQTvsRn
 type instance XHsQTvs       GhcPs = NoExt
 type instance XHsQTvs       GhcRn = HsQTvsRn
 type instance XHsQTvs       GhcTc = HsQTvsRn
+type instance XHsQTvs       GhcSe = NoExt
 
 type instance XXLHsQTyVars  (GhcPass _) = NoExt
 
@@ -316,6 +319,7 @@ data HsIBRn
 type instance XHsIB              GhcPs _ = NoExt
 type instance XHsIB              GhcRn _ = HsIBRn
 type instance XHsIB              GhcTc _ = HsIBRn
+type instance XHsIB              GhcSe _ = NoExt
 
 type instance XXHsImplicitBndrs  (GhcPass _) _ = NoExt
 
@@ -337,6 +341,7 @@ data HsWildCardBndrs pass thing
 type instance XHsWC              GhcPs b = NoExt
 type instance XHsWC              GhcRn b = [Name]
 type instance XHsWC              GhcTc b = [Name]
+type instance XHsWC              GhcSe b = NoExt
 
 type instance XXHsWildCardBndrs  (GhcPass _) b = NoExt
 
@@ -414,6 +419,10 @@ newtype HsIPName = HsIPName FastString
 
 hsIPNameFS :: HsIPName -> FastString
 hsIPNameFS (HsIPName n) = n
+
+instance Binary HsIPName where
+  put_ bh (HsIPName s) = put_ bh s
+  get bh = HsIPName <$> get bh
 
 instance Outputable HsIPName where
     ppr (HsIPName n) = char '?' <> ftext n -- Ordinary implicit parameters
@@ -659,6 +668,7 @@ type instance XKindSig         (GhcPass _) = NoExt
 type instance XSpliceTy        GhcPs = NoExt
 type instance XSpliceTy        GhcRn = NoExt
 type instance XSpliceTy        GhcTc = Kind
+type instance XSpliceTy        GhcSe = NoExt
 
 type instance XDocTy           (GhcPass _) = NoExt
 type instance XBangTy          (GhcPass _) = NoExt
@@ -667,16 +677,19 @@ type instance XRecTy           (GhcPass _) = NoExt
 type instance XExplicitListTy  GhcPs = NoExt
 type instance XExplicitListTy  GhcRn = NoExt
 type instance XExplicitListTy  GhcTc = Kind
+type instance XExplicitListTy  GhcSe = NoExt
 
 type instance XExplicitTupleTy GhcPs = NoExt
 type instance XExplicitTupleTy GhcRn = NoExt
 type instance XExplicitTupleTy GhcTc = [Kind]
+type instance XExplicitTupleTy GhcSe = NoExt
 
 type instance XTyLit           (GhcPass _) = NoExt
 
 type instance XWildCardTy      GhcPs = NoExt
 type instance XWildCardTy      GhcRn = HsWildCardInfo
 type instance XWildCardTy      GhcTc = HsWildCardInfo
+type instance XWildCardTy      GhcSe = NoExt
 
 type instance XXType         (GhcPass _) = NewHsTypeX
 
@@ -1137,27 +1150,32 @@ type LFieldOcc pass = Located (FieldOcc pass)
 -- both the 'RdrName' the user originally wrote, and after the
 -- renamer, the selector function.
 data FieldOcc pass = FieldOcc { extFieldOcc     :: XCFieldOcc pass
-                              , rdrNameFieldOcc :: Located RdrName
+                              , rdrNameFieldOcc :: Located (RdrOrSeName pass)
                                  -- ^ See Note [Located RdrNames] in HsExpr
                               }
 
   | XFieldOcc
       (XXFieldOcc pass)
-deriving instance (p ~ GhcPass pass, Eq (XCFieldOcc p)) => Eq  (FieldOcc p)
-deriving instance (p ~ GhcPass pass, Ord (XCFieldOcc p)) => Ord (FieldOcc p)
+deriving instance (p ~ GhcPass pass, Eq (XCFieldOcc p), Eq (RdrOrSeName p))
+               => Eq  (FieldOcc p)
+deriving instance (p ~ GhcPass pass, Ord (XCFieldOcc p), Ord (RdrOrSeName p))
+               => Ord (FieldOcc p)
 
 type instance XCFieldOcc GhcPs = NoExt
 type instance XCFieldOcc GhcRn = Name
 type instance XCFieldOcc GhcTc = Id
+type instance XCFieldOcc GhcSe = NoExt
 
 type instance XXFieldOcc (GhcPass _) = NoExt
 
-instance Outputable (FieldOcc pass) where
+instance Outputable (RdrOrSeName pass) => Outputable (FieldOcc pass) where
   ppr = ppr . rdrNameFieldOcc
 
 mkFieldOcc :: Located RdrName -> FieldOcc GhcPs
 mkFieldOcc rdr = FieldOcc noExt rdr
 
+fieldOccRdrName :: RdrOrSeName pass ~ RdrName => FieldOcc pass -> Located RdrName
+fieldOccRdrName = rdrNameFieldOcc
 
 -- | Ambiguous Field Occurrence
 --
@@ -1172,31 +1190,36 @@ mkFieldOcc rdr = FieldOcc noExt rdr
 -- Note [Disambiguating record fields] in TcExpr.
 -- See Note [Located RdrNames] in HsExpr
 data AmbiguousFieldOcc pass
-  = Unambiguous (XUnambiguous pass) (Located RdrName)
-  | Ambiguous   (XAmbiguous pass)   (Located RdrName)
+  = Unambiguous (XUnambiguous pass) (Located (RdrOrSeName pass))
+  | Ambiguous   (XAmbiguous pass)   (Located (RdrOrSeName pass))
   | XAmbiguousFieldOcc (XXAmbiguousFieldOcc pass)
 
 type instance XUnambiguous GhcPs = NoExt
 type instance XUnambiguous GhcRn = Name
 type instance XUnambiguous GhcTc = Id
+type instance XUnambiguous GhcSe = NoExt
 
 type instance XAmbiguous GhcPs = NoExt
 type instance XAmbiguous GhcRn = NoExt
 type instance XAmbiguous GhcTc = Id
+type instance XAmbiguous GhcSe = NoExt
 
 type instance XXAmbiguousFieldOcc (GhcPass _) = NoExt
 
-instance p ~ GhcPass pass => Outputable (AmbiguousFieldOcc p) where
+instance (p ~ GhcPass pass, Outputable (RdrOrSeName p))
+      => Outputable (AmbiguousFieldOcc p) where
   ppr = ppr . rdrNameAmbiguousFieldOcc
 
-instance p ~ GhcPass pass => OutputableBndr (AmbiguousFieldOcc p) where
+instance (p ~ GhcPass pass, OutputableBndr (RdrOrSeName p))
+      => OutputableBndr (AmbiguousFieldOcc p) where
   pprInfixOcc  = pprInfixOcc . rdrNameAmbiguousFieldOcc
   pprPrefixOcc = pprPrefixOcc . rdrNameAmbiguousFieldOcc
 
 mkAmbiguousFieldOcc :: Located RdrName -> AmbiguousFieldOcc GhcPs
 mkAmbiguousFieldOcc rdr = Unambiguous noExt rdr
 
-rdrNameAmbiguousFieldOcc :: AmbiguousFieldOcc (GhcPass p) -> RdrName
+rdrNameAmbiguousFieldOcc
+  :: AmbiguousFieldOcc (GhcPass p) -> RdrOrSeName (GhcPass p)
 rdrNameAmbiguousFieldOcc (Unambiguous _ (L _ rdr)) = rdr
 rdrNameAmbiguousFieldOcc (Ambiguous   _ (L _ rdr)) = rdr
 rdrNameAmbiguousFieldOcc (XAmbiguousFieldOcc _)

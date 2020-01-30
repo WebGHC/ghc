@@ -282,6 +282,7 @@ data ListPatTc
 type instance XWildPat GhcPs = NoExt
 type instance XWildPat GhcRn = NoExt
 type instance XWildPat GhcTc = Type
+type instance XWildPat GhcSe = NoExt
 
 type instance XVarPat  (GhcPass _) = NoExt
 type instance XLazyPat (GhcPass _) = NoExt
@@ -295,18 +296,22 @@ type instance XBangPat (GhcPass _) = NoExt
 type instance XListPat GhcPs = NoExt
 type instance XListPat GhcRn = Maybe (SyntaxExpr GhcRn)
 type instance XListPat GhcTc = ListPatTc
+type instance XListPat GhcSe = NoExt
 
 type instance XTuplePat GhcPs = NoExt
 type instance XTuplePat GhcRn = NoExt
 type instance XTuplePat GhcTc = [Type]
+type instance XTuplePat GhcSe = NoExt
 
 type instance XSumPat GhcPs = NoExt
 type instance XSumPat GhcRn = NoExt
 type instance XSumPat GhcTc = [Type]
+type instance XSumPat GhcSe = NoExt
 
 type instance XViewPat GhcPs = NoExt
 type instance XViewPat GhcRn = NoExt
 type instance XViewPat GhcTc = Type
+type instance XViewPat GhcSe = NoExt
 
 type instance XSplicePat (GhcPass _) = NoExt
 type instance XLitPat    (GhcPass _) = NoExt
@@ -314,14 +319,17 @@ type instance XLitPat    (GhcPass _) = NoExt
 type instance XNPat GhcPs = NoExt
 type instance XNPat GhcRn = NoExt
 type instance XNPat GhcTc = Type
+type instance XNPat GhcSe = NoExt
 
 type instance XNPlusKPat GhcPs = NoExt
 type instance XNPlusKPat GhcRn = NoExt
 type instance XNPlusKPat GhcTc = Type
+type instance XNPlusKPat GhcSe = NoExt
 
 type instance XSigPat GhcPs = (LHsSigWcType GhcPs)
 type instance XSigPat GhcRn = (LHsSigWcType GhcRn)
 type instance XSigPat GhcTc = Type
+type instance XSigPat GhcSe = (LHsSigWcType GhcSe)
 
 type instance XCoPat  (GhcPass _) = NoExt
 type instance XXPat   (GhcPass _) = NoExt
@@ -457,7 +465,9 @@ hsRecFieldSel = fmap extFieldOcc . hsRecFieldLbl
 hsRecFieldId :: HsRecField GhcTc arg -> Located Id
 hsRecFieldId = hsRecFieldSel
 
-hsRecUpdFieldRdr :: HsRecUpdField (GhcPass p) -> Located RdrName
+hsRecUpdFieldRdr
+  :: RdrOrSeName (GhcPass p) ~ RdrName
+  => HsRecUpdField (GhcPass p) -> Located RdrName
 hsRecUpdFieldRdr = fmap rdrNameAmbiguousFieldOcc . hsRecFieldLbl
 
 hsRecUpdFieldId :: HsRecField' (AmbiguousFieldOcc GhcTc) arg -> Located Id
@@ -557,7 +567,7 @@ pprConArgs (InfixCon p1 p2) = sep [ pprParendLPat appPrec p1
                                   , pprParendLPat appPrec p2 ]
 pprConArgs (RecCon rpats)   = ppr rpats
 
-instance (Outputable arg)
+instance (Outputable arg, Outputable (RdrOrSeName p))
       => Outputable (HsRecFields p arg) where
   ppr (HsRecFields { rec_flds = flds, rec_dotdot = Nothing })
         = braces (fsep (punctuate comma (map ppr flds)))

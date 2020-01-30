@@ -9,6 +9,7 @@ module PlaceHolder where
 import Name
 import NameSet
 import RdrName
+import SeName
 import Var
 
 
@@ -68,3 +69,4 @@ type family NameOrRdrName id where
   NameOrRdrName Id      = Name
   NameOrRdrName Name    = Name
   NameOrRdrName RdrName = RdrName
+  NameOrRdrName SeName  = SeName

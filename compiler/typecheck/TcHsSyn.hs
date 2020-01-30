@@ -114,7 +114,7 @@ hsPatType (NPlusKPat ty _ _ _ _ _)      = ty
 hsPatType (CoPat _ _ _ ty)              = ty
 hsPatType p                             = pprPanic "hsPatType" (ppr p)
 
-hsLitType :: HsLit (GhcPass p) -> TcType
+hsLitType :: LitType (GhcPass p) ~ TcType => HsLit (GhcPass p) -> TcType
 hsLitType (HsChar _ _)       = charTy
 hsLitType (HsCharPrim _ _)   = charPrimTy
 hsLitType (HsString _ _)     = stringTy

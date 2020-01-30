@@ -13,7 +13,7 @@
                                       -- in module PlaceHolder
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE TypeFamilies #-}
-
+{-# LANGUAGE DataKinds #-}
 module HsLit where
 
 #include "HsVersions.h"
@@ -63,11 +63,11 @@ data HsLit x
       -- ^ literal @Int64#@
   | HsWord64Prim (XHsWord64Prim x) {- SourceText -} Integer
       -- ^ literal @Word64#@
-  | HsInteger (XHsInteger x) {- SourceText -} Integer Type
+  | HsInteger (XHsInteger x) {- SourceText -} Integer (LitType x)
       -- ^ Genuinely an integer; arises only
       -- from TRANSLATION (overloaded
       -- literals are done with HsOverLit)
-  | HsRat (XHsRat x)  FractionalLit Type
+  | HsRat (XHsRat x)  FractionalLit (LitType x)
       -- ^ Genuinely a rational; arises only from
       -- TRANSLATION (overloaded literals are
       -- done with HsOverLit)
@@ -128,6 +128,7 @@ data OverLitTc
 type instance XOverLit GhcPs = NoExt
 type instance XOverLit GhcRn = Bool            -- Note [ol_rebindable]
 type instance XOverLit GhcTc = OverLitTc
+type instance XOverLit GhcSe = NoExt
 
 type instance XXOverLit (GhcPass _) = NoExt
 
@@ -151,7 +152,7 @@ overLitType XOverLit{} = panic "overLitType"
 
 -- | Convert a literal from one index type to another, updating the annotations
 -- according to the relevant 'Convertable' instance
-convertLit :: (ConvertIdX a b) => HsLit a -> HsLit b
+convertLit :: (ConvertIdX a b, LitType a ~ LitType b) => HsLit a -> HsLit b
 convertLit (HsChar a x)       = (HsChar (convert a) x)
 convertLit (HsCharPrim a x)   = (HsCharPrim (convert a) x)
 convertLit (HsString a x)     = (HsString (convert a) x)
