@@ -89,6 +89,13 @@ checkClosureShallow( const StgClosure* p )
     ASSERT(LOOKS_LIKE_CLOSURE_PTR(q));
 }
 
+// Ignore the return value, needed to match type signature in wasm runtime when calling from cmm
+void
+checkStackFrameWrap( StgPtr c )
+{
+  checkStackFrame(c);
+}
+
 // check an individual stack object
 StgOffset
 checkStackFrame( StgPtr c )
