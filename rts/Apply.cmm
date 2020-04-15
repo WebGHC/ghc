@@ -24,11 +24,11 @@ STRING(stg_ap_0_ret_str,"stg_ap_0_ret... ")
 stg_ap_0_fast ( P_ fun )
 {
     IF_DEBUG(apply,
-        ccall debugBelch(stg_ap_0_ret_str);
+        ccall debugBelchWrap(stg_ap_0_ret_str);
         ccall printClosure(R1 "ptr"));
 
     IF_DEBUG(sanity,
-        ccall checkStackFrame(Sp "ptr"));
+        ccall checkStackFrameWrap(Sp "ptr"));
 
 #if !defined(PROFILING)
 
