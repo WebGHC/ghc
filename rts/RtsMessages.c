@@ -107,6 +107,12 @@ vsysErrorBelch(const char*s, va_list ap)
 }
 
 void
+debugBelchWrap(const char*s)
+{
+  debugBelch(s);
+}
+
+void
 debugBelch(const char*s, ...)
 {
   va_list ap;

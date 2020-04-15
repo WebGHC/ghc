@@ -662,10 +662,10 @@ genApply regstatus args =
 
        tickForArity (length args),
        text "",
-       text "IF_DEBUG(apply,foreign \"C\" debugBelch(\"" <> fun_ret_label <>
+       text "IF_DEBUG(apply,foreign \"C\" debugBelchWrap(\"" <> fun_ret_label <>
           text "... \"); foreign \"C\" printClosure(R1 \"ptr\"));",
 
-       text "IF_DEBUG(sanity,foreign \"C\" checkStackFrame(Sp+WDS(" <> int (1 + all_args_size)
+       text "IF_DEBUG(sanity,foreign \"C\" checkStackFrameWrap(Sp+WDS(" <> int (1 + all_args_size)
         <> text ")\"ptr\"));",
 
 --       text "IF_DEBUG(sanity,checkStackChunk(Sp+" <> int (1 + all_args_size) <>
