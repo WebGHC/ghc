@@ -22,7 +22,7 @@ Flag ghci
     Default: False
     Manual: True
 
-Flag disableffi
+Flag disablelibffi
     Description: Disable libffi support.
     Default: False
     Manual: True
@@ -60,7 +60,7 @@ library
             GHCi.Signals
             GHCi.TH
 
-    if flag(disableffi)
+    if flag(disablelibffi)
         CPP-Options: -DDISABLE_FFI
 
     exposed-modules:
