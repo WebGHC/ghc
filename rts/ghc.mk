@@ -118,7 +118,7 @@ endef
 $(foreach lib,$(ALL_RTS_DEF_LIBNAMES),$(eval $(call make-importlib-def,$(lib))))
 endif
 
-ifneq "$(DisableFFI)" "YES"
+ifneq "$(DisableLibFFI)" "YES"
 ifneq "$(BINDIST)" "YES"
 ifneq "$(UseSystemLibFFI)" "YES"
 ifeq "$(TargetOS_CPP)" "mingw32"
@@ -169,7 +169,7 @@ endif
 rts_dist_$1_CC_OPTS += -DDYNAMIC
 endif
 
-ifeq "$(DisableFFI)" "YES"
+ifeq "$(DisableLibFFI)" "YES"
 rts_dist_$1_CC_OPTS += -DDISABLE_FFI
 endif
 
@@ -209,7 +209,7 @@ ifeq "$$(TargetOS_CPP)" "mingw32"
 rts_dist_$1_CC_OPTS += -DWINVER=$(rts_WINVER)
 endif
 
-ifneq "$(DisableFFI)" "YES"
+ifneq "$(DisableLibFFI)" "YES"
 ifneq "$$(UseSystemLibFFI)" "YES"
 rts_dist_FFI_SO = rts/dist/build/lib$$(LIBFFI_NAME)$$(soext)
 else
@@ -244,7 +244,7 @@ $$(rts_$1_LIB) : $$(rts_$1_OBJS) $$(ALL_RTS_DEF_LIBS) rts/dist/libs.depend rts/d
          "$(rts_INSTALL_INFO)-$(subst dyn,,$(subst _dyn,,$(subst v,,$1)))" "$(ProjectVersion)"
 
 else
-ifneq "$$(DisableFFI)" "YES"
+ifneq "$$(DisableLibFFI)" "YES"
 ifneq "$$(UseSystemLibFFI)" "YES"
 LIBFFI_LIBS = -Lrts/dist/build -l$$(LIBFFI_NAME)
 ifeq "$$(TargetElf)" "YES"
@@ -317,7 +317,7 @@ $$(rts_$1_LIB) : $$(rts_$1_LINKED_OBJS)
 	echo $$(rts_$1_LINKED_OBJS) $$(rts_$1_EXCLUDED_OBJS) | "$$(XARGS)" $$(XARGS_OPTS) "$$(AR_STAGE1)" \
 		$$(AR_OPTS_STAGE1) $$(EXTRA_AR_ARGS_STAGE1) $$@
 
-ifneq "$(DisableFFI)" "YES"
+ifneq "$(DisableLibFFI)" "YES"
 ifneq "$$(UseSystemLibFFI)" "YES"
 $$(rts_$1_LIB) : rts/dist/build/libC$$(LIBFFI_NAME)$$($1_libsuf)
 rts/dist/build/libC$$(LIBFFI_NAME)$$($1_libsuf): libffi/build/inst/lib/libffi.a
@@ -387,7 +387,7 @@ rts_CC_OPTS += -DNOSMP
 rts_HC_OPTS += -optc-DNOSMP
 endif
 
-ifneq "$(DisableFFI)" "YES"
+ifneq "$(DisableLibFFI)" "YES"
 ifeq "$(UseLibFFIForAdjustors)" "YES"
 rts_CC_OPTS += -DUSE_LIBFFI_FOR_ADJUSTORS
 endif
@@ -500,7 +500,7 @@ endif
 endif
 
 # add CFLAGS for libffi
-ifneq "$(DisableFFI)" "YES"
+ifneq "$(DisableLibFFI)" "YES"
 ifeq "$(UseSystemLibFFI)" "YES"
 LIBFFI_CFLAGS = $(addprefix -I,$(FFIIncludeDir))
 else
@@ -550,7 +550,7 @@ rts/sm/Evac_thr_HC_OPTS += -optc-funroll-loops
 #-----------------------------------------------------------------------------
 # Use system provided libffi
 
-ifneq "$(DisableFFI)" "YES"
+ifneq "$(DisableLibFFI)" "YES"
 ifeq "$(UseSystemLibFFI)" "YES"
 
 rts_PACKAGE_CPP_OPTS += -DFFI_INCLUDE_DIR=$(FFIIncludeDir)
@@ -595,7 +595,7 @@ endif
 $(eval $(call dependencies,rts,dist,1))
 
 $(rts_dist_depfile_c_asm) : $(DTRACEPROBES_H)
-ifneq "$(DisableFFI)" "YES"
+ifneq "$(DisableLibFFI)" "YES"
 ifneq "$(UseSystemLibFFI)" "YES"
 $(rts_dist_depfile_c_asm) : $(libffi_HEADERS)
 endif
@@ -646,7 +646,7 @@ rts/package.conf.inplace : $(includes_H_CONFIG) $(includes_H_PLATFORM)
 # installing
 
 RTS_INSTALL_LIBS += $(ALL_RTS_LIBS)
-ifneq "$(DisableFFI)" "YES"
+ifneq "$(DisableLibFFI)" "YES"
 ifneq "$(UseSystemLibFFI)" "YES"
 RTS_INSTALL_LIBS += $(wildcard rts/dist/build/lib$(LIBFFI_NAME)*$(soext)*)
 RTS_INSTALL_LIBS += $(foreach w,$(filter-out %dyn,$(rts_WAYS)),rts/dist/build/libC$(LIBFFI_NAME)$($w_libsuf))
