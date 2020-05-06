@@ -232,7 +232,11 @@ ArchHasAdjustorSupport = $(if $(findstring $(TargetArch_CPP),i386 x86_64),YES,NO
 ifeq "$(ArchHasAdjustorSupport)" "YES"
 UseLibFFIForAdjustors=NO
 else
+ifeq "$(DisableLibFFI)" "YES"
+UseLibFFIForAdjustors=NO
+else
 UseLibFFIForAdjustors=YES
+endif
 endif
 
 # On Windows we normally want to make a relocatable bindist, to we
